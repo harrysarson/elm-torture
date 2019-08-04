@@ -1,3 +1,5 @@
+#![warn(clippy::all, clippy::pedantic)]
+
 extern crate clap;
 extern crate which;
 mod lib;
@@ -5,16 +7,15 @@ mod lib;
 use crate::lib::compile::compile;
 use clap::App;
 use clap::Arg;
-
 use lib::compile;
-use lib::config::Config;
-
+use lib::run;
 use std::env;
 
-use std::fs::File;
-use std::path::Path;
+use std::path::PathBuf;
 use std::process;
 
+
+use std::fs::File;
 
 fn main() {
     let matches = App::new("Elm Torture")
@@ -33,16 +34,15 @@ fn main() {
             Arg::with_name("project")
                 .value_name("DIRECTORY")
                 .help("The suite to test")
-                .takes_value(true)
-                .required(true),
+                .takes_value(true),
         )
         .arg(
             Arg::with_name("show_config")
                 .long("showConfig")
+                .conflicts_with("project")
                 .help("Dump the configuration"),
         )
         .get_matches();
-
 
     let config = matches
         .value_of_os("config")
@@ -50,11 +50,7 @@ fn main() {
         .map(|file| {
             serde_json::from_reader(file).expect("error while reading json configuration file")
         })
-        .unwrap_or(Config::default());
-
-    let suite = matches.value_of("project").unwrap();
-
-    let suite = Path::new(suite);
+        .unwrap_or_default();
 
     if matches.is_present("show_config") {
         println!(
@@ -64,11 +60,19 @@ fn main() {
         process::exit(0);
     }
 
+    let suite = matches
+        .value_of("project")
+        .unwrap()
+        .parse::<PathBuf>()
+        .unwrap_or_else(|infalible| match infalible {});
+
     println!("Value for config: {:?}", config);
     println!("Testing suite: {:?}", suite);
 
+    // let out_dir = env::current_dir().unwrap().join("tmp");
+    // fs::create_dir(&out_dir).unwrap_or_default();
     let out_dir = env::temp_dir();
-    if let Err(err) = compile(suite, &out_dir, &config) {
+    if let Err(err) = compile(&suite, &out_dir, &config) {
         match err {
             compile::Error::CompilerNotFound(err) => {
                 eprintln!("Could not find elm compiler executable! Details:\n{}", err)
@@ -82,7 +86,14 @@ fn main() {
             compile::Error::CompilerStdErrNotEmpty(output) => {
                 eprintln!("Compilation sent output to stderr! Details:\n{:?}", output)
             }
+            compile::Error::SuiteDoesNotExist => {
+                eprintln!("{} is not an elm application or package!", suite.display())
+            }
         }
         process::exit(1);
+    }
+    if let Err(err) = run::run(&suite, &out_dir, &config) {
+        dbg!(err);
+        process::exit(2);
     }
 }

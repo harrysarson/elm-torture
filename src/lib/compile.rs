@@ -1,4 +1,3 @@
-
 use crate::lib::config::Config;
 use std::io;
 use std::path::Path;
@@ -11,14 +10,17 @@ pub enum Error {
     ProcessError(io::Error),
     CompilerError(process::Output),
     CompilerStdErrNotEmpty(process::Output),
+    SuiteDoesNotExist,
 }
 
 pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Error> {
-    let program = which::which(&config.program).map_err(Error::CompilerNotFound)?;
-
-    let res = Command::new(program)
-        .args(&["make", "src/Main.elm", "--output"])
+    if !suite.join("elm.json").exists() {
+        return Err(Error::SuiteDoesNotExist);
+    }
+    let elm_compiler = which::which(&config.elm_compiler).map_err(Error::CompilerNotFound)?;
+    let res = Command::new(elm_compiler)
         .current_dir(suite)
+        .args(&["make", "src/Main.elm", "--output"])
         .arg(out_dir.join("elm.js"))
         .output()
         .map_err(Error::ProcessError)?;
