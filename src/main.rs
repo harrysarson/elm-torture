@@ -77,10 +77,10 @@ fn main() {
             compile::Error::CompilerNotFound(err) => {
                 eprintln!("Could not find elm compiler executable! Details:\n{}", err)
             }
-            compile::Error::ProcessError(err) => {
+            compile::Error::Process(err) => {
                 eprintln!("Failed to execute compiler! Details:\n{}", err)
             }
-            compile::Error::CompilerError(output) => {
+            compile::Error::Compiler(output) => {
                 eprintln!("Compilation failed! Details:\n{:?}", output)
             }
             compile::Error::CompilerStdErrNotEmpty(output) => {

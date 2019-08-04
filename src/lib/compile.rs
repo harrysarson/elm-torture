@@ -7,8 +7,8 @@ use std::process::Command;
 
 pub enum Error {
     CompilerNotFound(which::Error),
-    ProcessError(io::Error),
-    CompilerError(process::Output),
+    Process(io::Error),
+    Compiler(process::Output),
     CompilerStdErrNotEmpty(process::Output),
     SuiteDoesNotExist,
 }
@@ -23,10 +23,10 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Erro
         .args(&["make", "src/Main.elm", "--output"])
         .arg(out_dir.join("elm.js"))
         .output()
-        .map_err(Error::ProcessError)?;
+        .map_err(Error::Process)?;
 
     if !res.status.success() {
-        return Err(Error::CompilerError(res));
+        return Err(Error::Compiler(res));
     }
 
     if !res.stderr.is_empty() {

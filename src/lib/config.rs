@@ -23,7 +23,7 @@ if (app.ports.write !== undefined) {
 
 impl Default for Config {
     fn default() -> Self {
-        Config {
+        Self {
             elm_compiler: "elm".into(),
             node: "node".into(),
             defaults: env::current_dir().unwrap(),

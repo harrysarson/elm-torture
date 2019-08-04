@@ -13,11 +13,11 @@ use std::process::Command;
 pub enum Error {
     NodeNotFound(which::Error),
     SuiteDoesNotExist,
-    ProcessError(io::Error),
+    NodeProcess(io::Error),
     CopyingCustomHarness(io::Error),
     CopyingDefaultHarness(io::Error),
     CopyingExpectedOutput(io::Error),
-    RuntimeError(process::Output),
+    Runtime(process::Output),
     CannotFindExpectedOutput,
     WrongOutputProduced { actual: Vec<u8>, expected: Vec<u8> },
 }
@@ -52,10 +52,10 @@ pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Error> {
     let res = Command::new(node_exe)
         .arg(out_file)
         .output()
-        .map_err(Error::ProcessError)?;
+        .map_err(Error::NodeProcess)?;
 
     if !res.status.success() {
-        return Err(Error::RuntimeError(res));
+        return Err(Error::Runtime(res));
     }
 
     if res.stdout != expected_output {
