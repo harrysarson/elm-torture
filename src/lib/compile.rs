@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process;
 use std::process::Command;
 
+#[derive(Debug)]
 pub enum Error {
     CompilerNotFound(which::Error),
     Process(io::Error),

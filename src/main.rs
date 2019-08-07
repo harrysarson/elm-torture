@@ -1,23 +1,31 @@
 #![warn(clippy::all, clippy::pedantic)]
 
-extern crate clap;
-extern crate which;
 mod lib;
 
-use crate::lib::compile::compile;
+use std::path::Path;
 use clap::App;
 use clap::Arg;
 use lib::compile;
-use lib::run;
+use lib::config;
+use lib::config::Config;
 use std::env;
-
+use std::fs::File;
 use std::path::PathBuf;
 use std::process;
+use std::num::NonZeroI32;
 
+enum CliTask {
+    DumpConfig,
+    RunSuite(PathBuf),
+    RunSuites(PathBuf),
+}
 
-use std::fs::File;
+struct CliInstructions {
+    config: config::Config,
+    task: CliTask,
+}
 
-fn main() {
+fn get_cli_task() -> CliInstructions {
     let matches = App::new("Elm Torture")
         .version("0.0.1")
         .author("Harry Sarson <harry.sarson@hotmail.co.uk>")
@@ -31,15 +39,25 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("project")
+            Arg::with_name("suite")
+                .long("suite")
                 .value_name("DIRECTORY")
                 .help("The suite to test")
+                .required(true)
+                .conflicts_with("show_config")
+                .conflicts_with("suites")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("suites")
+                .long("suites")
+                .value_name("DIRECTORY")
+                .help("A directory containing suites to test")
                 .takes_value(true),
         )
         .arg(
             Arg::with_name("show_config")
                 .long("showConfig")
-                .conflicts_with("project")
                 .help("Dump the configuration"),
         )
         .get_matches();
@@ -52,48 +70,107 @@ fn main() {
         })
         .unwrap_or_default();
 
-    if matches.is_present("show_config") {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&config).expect("could not serialize config")
-        );
-        process::exit(0);
+    CliInstructions {
+        config,
+        task: if matches.is_present("show_config") {
+            CliTask::DumpConfig
+        } else if let Some(suites) = matches.value_of("suites") {
+            CliTask::RunSuites(
+                suites
+                    .parse()
+                    .unwrap_or_else(|infalible| match infalible {}),
+            )
+        } else {
+            CliTask::RunSuite(
+                matches
+                    .value_of("suite")
+                    .unwrap()
+                    .parse()
+                    .unwrap_or_else(|infalible| match infalible {}),
+            )
+        },
     }
+}
 
-    let suite = matches
-        .value_of("project")
-        .unwrap()
-        .parse::<PathBuf>()
-        .unwrap_or_else(|infalible| match infalible {});
-
-    println!("Value for config: {:?}", config);
-    println!("Testing suite: {:?}", suite);
+fn run_suite(suite: &Path, config: &Config) -> Option<NonZeroI32> {
+    eprintln!("Value for config: {:?}", config);
+    eprintln!("Testing suite: {:?}", suite);
 
     // let out_dir = env::current_dir().unwrap().join("tmp");
     // fs::create_dir(&out_dir).unwrap_or_default();
     let out_dir = env::temp_dir();
-    if let Err(err) = compile(&suite, &out_dir, &config) {
-        match err {
-            compile::Error::CompilerNotFound(err) => {
-                eprintln!("Could not find elm compiler executable! Details:\n{}", err)
+    match lib::run_suite(&suite, &out_dir, &config) {
+        Err(err) => match err {
+            lib::Error::Compiler(err) => {
+                match err {
+                    compile::Error::CompilerNotFound(err) => {
+                        eprintln!(
+                            "Could not find elm compiler executable! Details:\n{}",
+                            err
+                        );
+                    }
+                    compile::Error::Process(err) => {
+                        eprintln!("Failed to execute compiler! Details:\n{}", err);
+                    }
+                    compile::Error::Compiler(output) => {
+                        eprintln!("Compilation failed! Details:\n{:?}", output);
+                    }
+                    compile::Error::CompilerStdErrNotEmpty(output) => {
+                        eprintln!(
+                            "Compilation sent output to stderr! Details:\n{:?}",
+                            output
+                        );
+                    }
+                    compile::Error::SuiteDoesNotExist => {
+                        eprintln!(
+                            "{} is not an elm application or package!",
+                            suite.display()
+                        );
+                    }
+                }
+                NonZeroI32::new(1)
             }
-            compile::Error::Process(err) => {
-                eprintln!("Failed to execute compiler! Details:\n{}", err)
+            lib::Error::Runner(err) => {
+                dbg!(err);
+                NonZeroI32::new(2)
             }
-            compile::Error::Compiler(output) => {
-                eprintln!("Compilation failed! Details:\n{:?}", output)
-            }
-            compile::Error::CompilerStdErrNotEmpty(output) => {
-                eprintln!("Compilation sent output to stderr! Details:\n{:?}", output)
-            }
-            compile::Error::SuiteDoesNotExist => {
-                eprintln!("{} is not an elm application or package!", suite.display())
-            }
+        },
+        Ok(()) => None,
+    }
+}
+
+fn iterate_till_some<U, It, F>(iter: It, func: F) -> Option<U>
+    where It: Iterator, F: Fn(It::Item) -> Option<U>
+{
+    for item in iter {
+        if let Some(val) = func(item) {
+            return Some(val);
         }
-        process::exit(1);
     }
-    if let Err(err) = run::run(&suite, &out_dir, &config) {
-        dbg!(err);
-        process::exit(2);
+    None
+}
+
+fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
+    let CliInstructions { config, task } = instructions;
+
+    match task {
+        CliTask::DumpConfig => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&config).expect("could not serialize config")
+            );
+            None
+        },
+        CliTask::RunSuite(suite) =>
+            run_suite(&suite, &config)
+        ,
+        CliTask::RunSuites(suite_dir) => {
+            let suites = lib::find_suites::find_suites(suite_dir).expect("error scanning for suites");
+            iterate_till_some(suites.iter(), |suite| run_suite(suite, &config))
+        }
     }
+}
+
+fn main() {
+    process::exit(run_app(&get_cli_task()).map_or(0, NonZeroI32::get));
 }
