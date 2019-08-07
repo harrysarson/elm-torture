@@ -109,6 +109,9 @@ fn run_suite(suite: &Path, config: &Config) -> Option<NonZeroI32> {
                             err
                         );
                     }
+                    compile::Error::ReadingTargets(err) => {
+                        eprintln!("targets.txt found in suite {} but could not be read!. Details:\n{}", &suite.display(), err);
+                    }
                     compile::Error::Process(err) => {
                         eprintln!("Failed to execute compiler! Details:\n{}", err);
                     }
