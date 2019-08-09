@@ -8,7 +8,6 @@ use std::string::String;
 pub struct Config {
     pub elm_compiler: String,
     pub node: String,
-    pub defaults: PathBuf,
 }
 
 pub const DEFAULT_HARNESS: &str = r#"
@@ -26,7 +25,6 @@ impl Default for Config {
         Self {
             elm_compiler: "elm".into(),
             node: "node".into(),
-            defaults: env::current_dir().unwrap(),
         }
     }
 }
