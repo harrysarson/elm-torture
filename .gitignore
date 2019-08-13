@@ -1,4 +1,5 @@
-/target
+/target/
 **/*.rs.bk
-elm-stuff
+elm-stuff/
 /suite/config.json
+/tmp/

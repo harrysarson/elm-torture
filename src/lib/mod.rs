@@ -1,10 +1,10 @@
-pub mod config;
 pub mod compile;
-pub mod run;
+pub mod config;
 pub mod find_suites;
+pub mod run;
 
-use config::Config;
 use compile::compile;
+use config::Config;
 use run::run;
 use std::path::Path;
 

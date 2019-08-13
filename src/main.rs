@@ -2,7 +2,6 @@
 
 mod lib;
 
-
 use clap::App;
 use clap::Arg;
 use lib::compile;
@@ -15,10 +14,12 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 
-
 enum CliTask {
     DumpConfig,
-    RunSuite(PathBuf),
+    RunSuite {
+        suite: PathBuf,
+        out_dir: Option<PathBuf>,
+    },
     RunSuites(PathBuf),
 }
 
@@ -55,8 +56,14 @@ fn get_cli_task() -> CliInstructions {
                 .long("suites")
                 .value_name("DIRECTORY")
                 .help("A directory containing suites to test")
-                .takes_value(true),
-        )
+                .conflicts_with("out_dir")
+                .takes_value (true))
+        .arg(
+            Arg::with_name("out_dir")
+                .long("out-dir")
+                .value_name("DIRECTORY")
+                .help("The directory to place built files in.\nMust not exist or be an empty directory")
+                .takes_value(true)  )
         .arg(
             Arg::with_name("show_config")
                 .long("showConfig")
@@ -83,56 +90,68 @@ fn get_cli_task() -> CliInstructions {
                     .unwrap_or_else(|infalible| match infalible {}),
             )
         } else {
-            CliTask::RunSuite(
-                matches
+            CliTask::RunSuite {
+                suite: matches
                     .value_of("suite")
                     .unwrap()
                     .parse()
                     .unwrap_or_else(|infalible| match infalible {}),
-            )
+                out_dir: matches
+                    .value_of("out_dir")
+                    .map(|dir| dir.parse().unwrap_or_else(|infalible| match infalible {})),
+            }
         },
     }
 }
 
-fn run_suite(suite: &Path, config: &Config) -> Option<NonZeroI32> {
+fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> Option<NonZeroI32> {
     eprintln!("Value for config: {:?}", config);
     eprintln!("Testing suite: {:?}", suite);
 
     // let out_dir = env::current_dir().unwrap().join("tmp");
     // fs::create_dir(&out_dir).unwrap_or_default();
-    let out_dir = env::temp_dir();
+    let out_dir = provided_out_dir.map_or_else(env::temp_dir, Path::to_path_buf);
     match lib::run_suite(&suite, &out_dir, &config) {
-        Err(err) => {
-            match err {
-                lib::Error::Compiler(err) => {
-                    match err {
-                        compile::Error::CompilerNotFound(err) => {
+        Err(err) => match err {
+            lib::Error::Compiler(err) => {
+                use compile::Error::*;
+                match err {
+                        CompilerNotFound(err) => {
                             eprintln!("Could not find elm compiler executable! Details:\n{}", err);
                         }
-                        compile::Error::ReadingTargets(err) => {
+                        ReadingTargets(err) => {
                             eprintln!("targets.txt found in suite {} but could not be read!. Details:\n{}", &suite.display(), err);
                         }
-                        compile::Error::Process(err) => {
+                        Process(err) => {
                             eprintln!("Failed to execute compiler! Details:\n{}", err);
                         }
-                        compile::Error::Compiler(output) => {
+                        Compiler(output) => {
                             eprintln!("Compilation failed! Details:\n{:?}", output);
                         }
-                        compile::Error::CompilerStdErrNotEmpty(output) => {
+                        CompilerStdErrNotEmpty(output) => {
                             eprintln!("Compilation sent output to stderr! Details:\n{:?}", output);
                         }
-                        compile::Error::SuiteDoesNotExist => {
+                        SuiteDoesNotExist => {
                             eprintln!("{} is not an elm application or package!", suite.display());
                         }
+
+                        OutDirIsNotDir => {
+                            match provided_out_dir {
+                                Some(dir) =>
+                                    eprintln!("{} must either be a directory or a path where elm-torture can create one!",
+                                    dir.display()),
+                                None =>
+                                    panic!("Invalid tempory directory: {}", out_dir.display()),
+                            }
+                        }
                     }
-                    NonZeroI32::new(1)
-                }
-                lib::Error::Runner(err) => {
-                    dbg!(err);
-                    NonZeroI32::new(2)
-                }
+                NonZeroI32::new(1)
             }
-        }
+            lib::Error::Runner(err) => {
+                dbg!(err);
+                NonZeroI32::new(2)
+            }
+        },
         Ok(()) => None,
     }
 }
@@ -165,7 +184,7 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
             );
             None
         }
-        CliTask::RunSuite(suite) => {
+        CliTask::RunSuite { suite, out_dir } => {
             println!("{}", welcome_message);
             println!();
             println!(
@@ -173,11 +192,11 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
                 get_absolute_path_if_possible(&suite).display()
             );
             println!();
-            run_suite(&suite, &config)
+            run_suite(suite, out_dir.as_ref().map(PathBuf::as_ref), &config)
         }
         CliTask::RunSuites(suite_dir) => {
             let suites =
-                lib::find_suites::find_suites(suite_dir).expect("error scanning for suites");
+                lib::find_suites::find_suites(&suite_dir).expect("error scanning for suites");
             println!("{}", welcome_message);
             println!();
             {
@@ -192,7 +211,7 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
                 println!("  {}", get_absolute_path_if_possible(&path).display());
             }
             println!();
-            iterate_till_some(suites.iter(), |suite| run_suite(suite, &config))
+            iterate_till_some(suites.iter(), |suite| run_suite(suite, None, &config))
         }
     }
 }

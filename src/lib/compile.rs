@@ -2,10 +2,11 @@ use crate::lib::config::Config;
 use std::io;
 use std::path::Path;
 
-use std::process;
-use std::process::Command;
+use std::fs;
 use std::fs::File;
 use std::io::Read;
+use std::process;
+use std::process::Command;
 
 #[derive(Debug)]
 pub enum Error {
@@ -15,15 +16,23 @@ pub enum Error {
     CompilerStdErrNotEmpty(process::Output),
     ReadingTargets(io::Error),
     SuiteDoesNotExist,
+    OutDirIsNotDir,
 }
 
 pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Error> {
+    if !out_dir.exists() {
+        let _ = fs::create_dir(out_dir);
+    } else if !out_dir.is_dir() {
+        return Err(Error::OutDirIsNotDir);
+    }
     if !suite.join("elm.json").exists() {
         return Err(Error::SuiteDoesNotExist);
     }
     let root_files = if let Ok(mut targets) = File::open(suite.join("targets.txt")) {
         let mut contents = String::new();
-        targets.read_to_string(&mut contents).map_err(Error::ReadingTargets)?;
+        targets
+            .read_to_string(&mut contents)
+            .map_err(Error::ReadingTargets)?;
         contents.split('\n').map(String::from).collect()
     } else {
         vec![String::from("src/Main.elm")]
@@ -34,7 +43,11 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Erro
         .arg("make")
         .args(root_files)
         .arg("--output")
-        .arg(out_dir.join("elm.js"))
+        .arg(
+            fs::canonicalize(out_dir)
+                .map_err(Error::Process)?
+                .join("elm.js"),
+        )
         .output()
         .map_err(Error::Process)?;
 

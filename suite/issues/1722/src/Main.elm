@@ -1,0 +1,30 @@
+port module Main exposing (main)
+
+import Platform
+
+port write: String -> Cmd never
+
+fromMaybe : ((a -> Maybe b) -> c) -> ((a -> b) -> c)
+fromMaybe f =
+    f << (<<) Just
+
+toWrite : String
+toWrite =
+    fromMaybe
+        (\makeMaybeList ->
+            let
+                list = makeMaybeList 7
+                    |> Maybe.withDefault []
+            in
+                List.length list
+                    |> String.fromInt
+        )
+        (\x -> [x, x])
+
+main: Platform.Program () () ()
+main =
+    Platform.worker
+        { init = \() -> ((), write toWrite)
+        , update = \() () -> ((), Cmd.none)
+        , subscriptions = \() -> Sub.none
+        }

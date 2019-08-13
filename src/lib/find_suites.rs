@@ -3,7 +3,6 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
-
 #[derive(Debug)]
 pub enum Error {
     ProvidedPathIsNotDir,
@@ -22,9 +21,7 @@ pub fn find_suites(suites_dir: &Path) -> Result<Box<[PathBuf]>, Error> {
     } else {
         Err(Error::ProvidedPathIsNotDir)
     }
-
 }
-
 
 fn add_suites(suites_dir: &Path, suites_list: &mut Vec<PathBuf>) -> Result<(), Error> {
     let entries = fs::read_dir(suites_dir).map_err(Error::ReadingDir)?;
