@@ -31,7 +31,7 @@ fn add_suites(suites_dir: &Path, suites_list: &mut Vec<PathBuf>) -> Result<(), E
         if suite_path.join("elm.json").exists() {
             suites_list.push(suite_path);
         } else if suite_path.is_dir() {
-            add_suites(suites_dir, suites_list)?;
+            add_suites(&suite_path, suites_list)?;
         }
     }
     Ok(())
