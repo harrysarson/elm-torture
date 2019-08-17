@@ -15,7 +15,7 @@ pub enum Error {
     SuiteDoesNotExist,
     NodeProcess(io::Error),
     CopyingCustomHarness(io::Error),
-    CopyingDefaultHarness(io::Error),
+    WritingHarness(io::Error),
     CopyingExpectedOutput(io::Error),
     Runtime(process::Output),
     CannotFindExpectedOutput,
@@ -35,7 +35,7 @@ pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Error> {
         .or_else(|e| match e.kind() {
             io::ErrorKind::NotFound => fs::write(&out_file, config::DEFAULT_HARNESS)
                 .map(|_| ())
-                .map_err(Error::CopyingDefaultHarness),
+                .map_err(Error::WritingHarness),
             _ => Err(Error::CopyingCustomHarness(e)),
         })?;
 
