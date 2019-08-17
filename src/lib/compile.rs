@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::Read;
 use std::process;
 use std::process::Command;
+use log::{debug};
 
 #[derive(Debug)]
 pub enum Error {
@@ -38,18 +39,20 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Erro
         vec![String::from("src/Main.elm")]
     };
     let elm_compiler = which::which(&config.elm_compiler).map_err(Error::CompilerNotFound)?;
-    let res = Command::new(elm_compiler)
-        .current_dir(suite)
-        .arg("make")
-        .args(root_files)
-        .arg("--output")
-        .arg(
-            fs::canonicalize(out_dir)
-                .map_err(Error::Process)?
-                .join("elm.js"),
-        )
-        .output()
-        .map_err(Error::Process)?;
+    let mut command = Command::new(elm_compiler);
+    command.current_dir(suite);
+    command.arg("make");
+    command.args(root_files);
+    command.arg("--output");
+    command.arg(
+        fs::canonicalize(out_dir)
+            .map_err(Error::Process)?
+            .join("elm.js"),
+    );
+
+    debug!("Invoking compiler: {:?}", command);
+
+    let res = command.output().map_err(Error::Process)?;
 
     if !res.status.success() {
         return Err(Error::Compiler(res));

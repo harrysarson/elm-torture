@@ -112,10 +112,11 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
     // fs::create_dir(&out_dir).unwrap_or_default();
     let out_dir = provided_out_dir.map_or_else(env::temp_dir, Path::to_path_buf);
     match lib::run_suite(&suite, &out_dir, &config) {
-        Err(err) => match err {
-            lib::Error::Compiler(err) => {
-                use compile::Error::*;
-                match err {
+        Err(err) => {
+            match err {
+                lib::Error::Compiler(err) => {
+                    use compile::Error::*;
+                    match err {
                         CompilerNotFound(err) => {
                             eprintln!("Could not find elm compiler executable! Details:\n{}", err);
                         }
@@ -126,7 +127,12 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                             eprintln!("Failed to execute compiler! Details:\n{}", err);
                         }
                         Compiler(output) => {
-                            eprintln!("Compilation failed! Details:\n{:?}", output);
+                            eprintln!(r#"Compilation failed!
+Exit code: {}
+Stdout:
+{}
+Stderr:
+{}"#, output.status, String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
                         }
                         CompilerStdErrNotEmpty(output) => {
                             eprintln!("Compilation sent output to stderr! Details:\n{:?}", output);
@@ -145,54 +151,62 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                             }
                         }
                     }
-                NonZeroI32::new(1)
-            }
-            lib::Error::Runner(err) => {
-                use lib::run::Error::*;
-                eprintln!("The suite {} failed at run time.", suite.display());
-                match err {
-                    NodeNotFound(err) => {
-                        eprintln!("Could not find node executable to run generated Javascript. Details:\n{}", err);
-                    }
-                    SuiteDoesNotExist => {
-                        eprintln!("Internal: path was not suite - should have been checked already thogu?");
-                    },
-                    NodeProcess(err) => {
-                        eprintln!("The node process errored unexpectedly:\n{}", err);
-                    },
-                    CopyingCustomHarness(err) => {
-                        eprintln!("A custom test harness was found but could not be copied. Details:\n{}", err);
-                    },
-                    WritingHarness(err) => {
-                        eprintln!("Cannot add the test harness to the output directory. Details:\n{}", err);
-                    },
-                    CopyingExpectedOutput(err) => {
-                        eprintln!("The expected output exists but cannot be copied. Details:\n{}", err);
-                    },
-                    Runtime(output) => {
-                        eprintln!("Runtime error when running suite. Details:\n{:?}", output);
-                    },
-                    CannotFindExpectedOutput => {
-                        eprintln!("{}\n{}",
+                    NonZeroI32::new(1)
+                }
+                lib::Error::Runner(err) => {
+                    use lib::run::Error::*;
+                    eprintln!("The suite {} failed at run time.", suite.display());
+                    match err {
+                        NodeNotFound(err) => {
+                            eprintln!("Could not find node executable to run generated Javascript. Details:\n{}", err);
+                        }
+                        SuiteDoesNotExist => {
+                            eprintln!("Internal: path was not suite - should have been checked already thogu?");
+                        }
+                        NodeProcess(err) => {
+                            eprintln!("The node process errored unexpectedly:\n{}", err);
+                        }
+                        CopyingCustomHarness(err) => {
+                            eprintln!("A custom test harness was found but could not be copied. Details:\n{}", err);
+                        }
+                        WritingHarness(err) => {
+                            eprintln!(
+                                "Cannot add the test harness to the output directory. Details:\n{}",
+                                err
+                            );
+                        }
+                        CopyingExpectedOutput(err) => {
+                            eprintln!(
+                                "The expected output exists but cannot be copied. Details:\n{}",
+                                err
+                            );
+                        }
+                        Runtime(output) => {
+                            eprintln!("Runtime error when running suite. Details:\n{:?}", output);
+                        }
+                        CannotFindExpectedOutput => {
+                            eprintln!("{}\n{}",
                             "Each suite must contain a file 'output.txt', containing the text that",
                             "the suite should write to stdout"
                         );
-                    },
-                    WrongOutputProduced { actual, expected } => {
-                        eprintln!(r#"The suite ran without error but with incorrect output!
+                        }
+                        WrongOutputProduced { actual, expected } => {
+                            eprintln!(
+                                r#"The suite ran without error but with incorrect output!
 
 = Expected =
 {}
 = Actual =
 {}"#,
-                            String::from_utf8_lossy(&actual),
-                            String::from_utf8_lossy(&expected),
-                        );
-                    },
+                                String::from_utf8_lossy(&actual),
+                                String::from_utf8_lossy(&expected),
+                            );
+                        }
+                    }
+                    NonZeroI32::new(2)
                 }
-                NonZeroI32::new(2)
             }
-        },
+        }
         Ok(()) => None,
     }
 }
@@ -258,5 +272,6 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
 }
 
 fn main() {
+    env_logger::init();
     process::exit(run_app(&get_cli_task()).map_or(0, NonZeroI32::get));
 }
