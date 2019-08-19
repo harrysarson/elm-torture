@@ -43,6 +43,7 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Erro
     command.current_dir(suite);
     command.arg("make");
     command.args(root_files);
+    command.args(config.args.iter());
     command.arg("--output");
     command.arg(
         fs::canonicalize(out_dir)

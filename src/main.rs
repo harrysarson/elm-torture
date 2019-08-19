@@ -49,7 +49,6 @@ fn get_cli_task() -> CliInstructions {
                 .value_name("DIRECTORY")
                 .help("The suite to test")
                 .required(true)
-                .conflicts_with("show_config")
                 .conflicts_with("suites")
                 .takes_value(true),
         )
@@ -115,9 +114,9 @@ impl<'a> fmt::Display for OutputPrinter<'a> {
             fmt,
             r#"Compilation failed!
  = Exit code: {} =
-= Stdout =
+ = Std Out =
 {}
-= Stderr =
+ = Std Err =
 {}"#,
             output.status,
             String::from_utf8_lossy(&output.stdout),
@@ -197,6 +196,10 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                         }
                         Runtime(output) => {
                             eprintln!("{}", OutputPrinter(&output));
+                            eprintln!(
+                                "\n\nTo inspect the built files that caused this error see:\n  {}",
+                                out_dir.display()
+                            )
                         }
                         CannotFindExpectedOutput => {
                             eprintln!("{}\n{}",

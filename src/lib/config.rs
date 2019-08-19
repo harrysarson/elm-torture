@@ -5,6 +5,7 @@ use std::string::String;
 pub struct Config {
     pub elm_compiler: String,
     pub node: String,
+    pub args: Box<[String]>
 }
 
 pub const DEFAULT_HARNESS: &str = r#"
@@ -22,6 +23,7 @@ impl Default for Config {
         Self {
             elm_compiler: "elm".into(),
             node: "node".into(),
+            args: Box::default(),
         }
     }
 }

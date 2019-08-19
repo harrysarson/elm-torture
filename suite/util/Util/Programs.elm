@@ -1,4 +1,4 @@
-port module Util.Programs exposing (print, write)
+port module Util.Programs exposing (print)
 
 import Platform
 
