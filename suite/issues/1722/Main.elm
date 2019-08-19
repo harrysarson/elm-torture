@@ -1,8 +1,7 @@
-port module Main exposing (main)
+module Main exposing (main)
 
 import Platform
-
-port write: String -> Cmd never
+import Util.Programs
 
 fromMaybe : ((a -> Maybe b) -> c) -> ((a -> b) -> c)
 fromMaybe f =
@@ -23,8 +22,4 @@ toWrite =
 
 main: Platform.Program () () ()
 main =
-    Platform.worker
-        { init = \() -> ((), write toWrite)
-        , update = \() () -> ((), Cmd.none)
-        , subscriptions = \() -> Sub.none
-        }
+    Util.Programs.print toWrite

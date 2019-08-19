@@ -1,2 +1,2 @@
 Module1.elm
-Module2.elm
+Main.elm

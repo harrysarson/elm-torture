@@ -1,11 +1,9 @@
-port module Main exposing (main)
+module Main exposing (main)
 
 import Json.Encode
 import Json.Value
 import Platform
-
-
-port write : String -> Cmd never
+import Util.Programs
 
 
 jsonValue : Json.Value.JsonValue
@@ -22,8 +20,4 @@ toWrite =
 
 main : Platform.Program () () ()
 main =
-    Platform.worker
-        { init = \() -> ( (), write toWrite )
-        , update = \() () -> ( (), Cmd.none )
-        , subscriptions = \() -> Sub.none
-        }
+    Util.Programs.print toWrite

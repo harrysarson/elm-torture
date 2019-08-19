@@ -2,12 +2,12 @@ use crate::lib::config::Config;
 use std::io;
 use std::path::Path;
 
+use log::debug;
 use std::fs;
 use std::fs::File;
 use std::io::Read;
 use std::process;
 use std::process::Command;
-use log::{debug};
 
 #[derive(Debug)]
 pub enum Error {
@@ -36,7 +36,7 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Erro
             .map_err(Error::ReadingTargets)?;
         contents.split('\n').map(String::from).collect()
     } else {
-        vec![String::from("src/Main.elm")]
+        vec![String::from("Main.elm")]
     };
     let elm_compiler = which::which(&config.elm_compiler).map_err(Error::CompilerNotFound)?;
     let mut command = Command::new(elm_compiler);
