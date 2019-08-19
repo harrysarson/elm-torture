@@ -8,11 +8,13 @@ use lib::compile;
 use lib::config;
 use lib::config::Config;
 use std::env;
+use std::fmt;
 use std::fs::File;
 use std::num::NonZeroI32;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
+use std::process::Output;
 
 enum CliTask {
     DumpConfig,
@@ -104,6 +106,26 @@ fn get_cli_task() -> CliInstructions {
     }
 }
 
+struct OutputPrinter<'a>(&'a Output);
+
+impl<'a> fmt::Display for OutputPrinter<'a> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let OutputPrinter(output) = self;
+        write!(
+            fmt,
+            r#"Compilation failed!
+ = Exit code: {} =
+= Stdout =
+{}
+= Stderr =
+{}"#,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    }
+}
+
 fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> Option<NonZeroI32> {
     eprintln!("Value for config: {:?}", config);
     eprintln!("Testing suite: {:?}", suite);
@@ -124,18 +146,10 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                             eprintln!("targets.txt found in suite {} but could not be read!. Details:\n{}", &suite.display(), err);
                         }
                         Process(err) => {
-                            eprintln!("Failed to execute compiler! Details:\n{}", err);
+                            panic!("Failed to execute compiler! Details:\n{}", err);
                         }
-                        Compiler(output) => {
-                            eprintln!(r#"Compilation failed!
-Exit code: {}
-Stdout:
-{}
-Stderr:
-{}"#, output.status, String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-                        }
-                        CompilerStdErrNotEmpty(output) => {
-                            eprintln!("Compilation sent output to stderr! Details:\n{:?}", output);
+                        Compiler(output) | CompilerStdErrNotEmpty(output) => {
+                            eprintln!("{}", OutputPrinter(&output));
                         }
                         SuiteDoesNotExist => {
                             eprintln!("{} is not an elm application or package!", suite.display());
@@ -161,28 +175,28 @@ Stderr:
                             eprintln!("Could not find node executable to run generated Javascript. Details:\n{}", err);
                         }
                         SuiteDoesNotExist => {
-                            eprintln!("Internal: path was not suite - should have been checked already thogu?");
+                            panic!("Path was not suite - should have been checked already thogu?");
                         }
                         NodeProcess(err) => {
-                            eprintln!("The node process errored unexpectedly:\n{}", err);
+                            panic!("The node process errored unexpectedly:\n{}", err);
                         }
                         CopyingCustomHarness(err) => {
-                            eprintln!("A custom test harness was found but could not be copied. Details:\n{}", err);
+                            panic!("A custom test harness was found but could not be copied. Details:\n{}", err);
                         }
                         WritingHarness(err) => {
-                            eprintln!(
+                            panic!(
                                 "Cannot add the test harness to the output directory. Details:\n{}",
                                 err
                             );
                         }
                         CopyingExpectedOutput(err) => {
-                            eprintln!(
+                            panic!(
                                 "The expected output exists but cannot be copied. Details:\n{}",
                                 err
                             );
                         }
                         Runtime(output) => {
-                            eprintln!("Runtime error when running suite. Details:\n{:?}", output);
+                            eprintln!("{}", OutputPrinter(&output));
                         }
                         CannotFindExpectedOutput => {
                             eprintln!("{}\n{}",
