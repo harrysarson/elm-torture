@@ -1,9 +1,10 @@
 module Main exposing (main)
 
-import Browser
 import Array exposing (Array)
+import Browser
 import Platform
 import Util.Programs
+
 
 type Msg
     = Msg (Array ())
@@ -11,4 +12,4 @@ type Msg
 
 main : Program () () Msg
 main =
-    Util.Programs.print "ok"
+    Util.Programs.noop

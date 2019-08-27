@@ -1,13 +1,15 @@
-module Main exposing (test2)
+module Main exposing (main, test2)
 
+import Module1
 import Platform
 import Util.Programs
-import Module1
+
 
 test2 : ()
 test2 =
     Module1.test1
 
+
 main : Platform.Program () () ()
 main =
-    Util.Programs.print "ok"
+    Util.Programs.noop

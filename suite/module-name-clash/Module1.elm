@@ -1,12 +1,14 @@
 module Module1 exposing (test1)
 
-import Util.Programs
 import Platform
+import Util.Programs
+
 
 test1 : ()
 test1 =
     ()
 
+
 main : Platform.Program () () ()
 main =
-    Util.Programs.print "ok"
+    Util.Programs.noop

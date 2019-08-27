@@ -1,53 +1,61 @@
-use crate::lib::config;
 use crate::lib::config::Config;
 use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::Read;
 use std::path::Path;
-
 use std::process;
 use std::process::Command;
+use std::str;
+use std::string;
 
 #[derive(Debug)]
 pub enum Error {
     NodeNotFound(which::Error),
     SuiteDoesNotExist,
     NodeProcess(io::Error),
-    CopyingCustomHarness(io::Error),
     WritingHarness(io::Error),
     CopyingExpectedOutput(io::Error),
     Runtime(process::Output),
     CannotFindExpectedOutput,
-    WrongOutputProduced { actual: Vec<u8>, expected: Vec<u8> },
+    ExpectedOutputNotUtf8(string::FromUtf8Error),
+    OutputProduced(process::Output),
 }
 
 pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Error> {
     if !suite.join("elm.json").exists() {
         return Err(Error::SuiteDoesNotExist);
     }
-    let harness_file_name = "harness.js";
+    let expected_output_path = suite.join("output.json");
     let node_exe = which::which(&config.node).map_err(Error::NodeNotFound)?;
-
-    let out_file = out_dir.join(harness_file_name);
-    fs::copy(suite.join(harness_file_name), &out_file)
-        .map(|_| ())
-        .or_else(|e| match e.kind() {
-            io::ErrorKind::NotFound => fs::write(&out_file, config::DEFAULT_HARNESS)
-                .map(|_| ())
-                .map_err(Error::WritingHarness),
-            _ => Err(Error::CopyingCustomHarness(e)),
-        })?;
+    let out_file = out_dir.join("harness.js");
 
     let expected_output = {
         let mut data = Vec::new();
-        File::open(suite.join("output.txt"))
+        File::open(expected_output_path)
             .map_err(|_| Error::CannotFindExpectedOutput)?
             .read_to_end(&mut data)
-            .map(|_| ())
             .map_err(Error::CopyingExpectedOutput)?;
-        data
+        String::from_utf8(data).map_err(Error::ExpectedOutputNotUtf8)?
     };
+
+    fs::write(
+        &out_file,
+        format!(
+            r#"
+const {{ Elm }} = require('./elm.js');
+const expectedOutput = JSON.parse(`{}`);
+{}
+
+module.exports(Elm, expectedOutput);
+"#,
+            &expected_output,
+            str::from_utf8(include_bytes!("../../embed-assets/run.js"))
+                .expect("Embedded js template should be valid utf8."),
+        ),
+    )
+    .map(|_| ())
+    .map_err(Error::WritingHarness)?;
 
     let res = Command::new(node_exe)
         .arg(out_file)
@@ -57,12 +65,8 @@ pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Error> {
     if !res.status.success() {
         return Err(Error::Runtime(res));
     }
-
-    if res.stdout != expected_output {
-        return Err(Error::WrongOutputProduced {
-            actual: res.stdout,
-            expected: expected_output,
-        });
+    if !res.stdout.is_empty() {
+        return Err(Error::OutputProduced(res));
     }
 
     Ok(())

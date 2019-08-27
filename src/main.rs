@@ -112,7 +112,7 @@ impl<'a> fmt::Display for OutputPrinter<'a> {
         let OutputPrinter(output) = self;
         write!(
             fmt,
-            r#"Compilation failed!
+            r#"
  = Exit code: {} =
  = Std Out =
 {}
@@ -148,7 +148,7 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                             panic!("Failed to execute compiler! Details:\n{}", err);
                         }
                         Compiler(output) | CompilerStdErrNotEmpty(output) => {
-                            eprintln!("{}", OutputPrinter(&output));
+                            eprintln!("Compilation failed!\n{}", OutputPrinter(&output));
                         }
                         SuiteDoesNotExist => {
                             eprintln!("{} is not an elm application or package!", suite.display());
@@ -179,14 +179,14 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                         NodeProcess(err) => {
                             panic!("The node process errored unexpectedly:\n{}", err);
                         }
-                        CopyingCustomHarness(err) => {
-                            panic!("A custom test harness was found but could not be copied. Details:\n{}", err);
-                        }
                         WritingHarness(err) => {
                             panic!(
                                 "Cannot add the test harness to the output directory. Details:\n{}",
                                 err
                             );
+                        }
+                        ExpectedOutputNotUtf8(_) => {
+                            panic!("Expected output is not valid utf8");
                         }
                         CopyingExpectedOutput(err) => {
                             panic!(
@@ -202,21 +202,15 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                             )
                         }
                         CannotFindExpectedOutput => {
-                            eprintln!("{}\n{}",
-                            "Each suite must contain a file 'output.txt', containing the text that",
-                            "the suite should write to stdout"
-                        );
-                        }
-                        WrongOutputProduced { actual, expected } => {
                             eprintln!(
-                                r#"The suite ran without error but with incorrect output!
-
-= Expected =
-{}
-= Actual =
-{}"#,
-                                String::from_utf8_lossy(&actual),
-                                String::from_utf8_lossy(&expected),
+                                "{}\n{}",
+                                "Each suite must contain a file 'output.txt', containing the text that",
+                                "the suite should write to stdout"
+                            );
+                        }
+                        OutputProduced(output) => {
+                            eprintln!(
+                                "The suite ran without error but produced the following output!:\n{}", OutputPrinter(&output)
                             );
                         }
                     }

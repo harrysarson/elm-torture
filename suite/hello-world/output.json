@@ -1,0 +1,7 @@
+{
+    "ports": {
+        "write": [
+            "Hello World!"
+        ]
+    }
+}
