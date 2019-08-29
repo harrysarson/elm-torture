@@ -72,13 +72,25 @@ fn get_cli_task() -> CliInstructions {
         )
         .get_matches();
 
-    let config = matches
-        .value_of_os("config")
-        .map(|p| File::open(p).expect("config file not found"))
-        .map(|file| {
-            serde_json::from_reader(file).expect("error while reading json configuration file")
-        })
-        .unwrap_or_default();
+    let config = {
+        let config_file = matches.value_of_os("config");
+
+        let mut deserialised: Config = config_file
+            .map(|p| File::open(p).expect("config file not found"))
+            .map(|file| {
+                serde_json::from_reader(file).expect("error while reading json configuration file")
+            })
+            .unwrap_or_default();
+
+        if let Some(config_dir) = config_file.map(Path::new).and_then(Path::parent) {
+            deserialised.allowed_failures = deserialised
+                .allowed_failures
+                .iter()
+                .map(|p| config_dir.join(p))
+                .collect();
+        }
+        deserialised
+    };
 
     CliInstructions {
         config,
@@ -126,18 +138,25 @@ impl<'a> fmt::Display for OutputPrinter<'a> {
 }
 
 fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> Option<NonZeroI32> {
-    eprintln!("Value for config: {:?}", config);
-    eprintln!("Testing suite: {:?}", suite);
+    let failure_allowed = config.allowed_failures.iter().any(|p| {
+        if p.exists() {
+            same_file::is_same_file(suite, p).unwrap_or_else(|_| {
+                panic!("Error when comparing the paths {:?} and {:?}", suite, p)
+            })
+        } else {
+            false
+        }
+    });
+    println!("Testing suite: {:?}...", suite);
 
     // let out_dir = env::current_dir().unwrap().join("tmp");
     // fs::create_dir(&out_dir).unwrap_or_default();
     let out_dir = provided_out_dir.map_or_else(env::temp_dir, Path::to_path_buf);
-    match lib::run_suite(&suite, &out_dir, &config) {
-        Err(err) => {
-            match err {
-                lib::Error::Compiler(err) => {
-                    use compile::Error::*;
-                    match err {
+    let exit_code = match lib::run_suite(&suite, &out_dir, &config) {
+        Err(err) => match err {
+            lib::Error::Compiler(err) => {
+                use compile::Error::*;
+                match err {
                         CompilerNotFound(err) => {
                             eprintln!("Could not find elm compiler executable! Details:\n{}", err);
                         }
@@ -164,61 +183,72 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                             }
                         }
                     }
-                    NonZeroI32::new(1)
-                }
-                lib::Error::Runner(err) => {
-                    use lib::run::Error::*;
-                    eprintln!("The suite {} failed at run time.", suite.display());
-                    match err {
-                        NodeNotFound(err) => {
-                            eprintln!("Could not find node executable to run generated Javascript. Details:\n{}", err);
-                        }
-                        SuiteDoesNotExist => {
-                            panic!("Path was not suite - should have been checked already thogu?");
-                        }
-                        NodeProcess(err) => {
-                            panic!("The node process errored unexpectedly:\n{}", err);
-                        }
-                        WritingHarness(err) => {
-                            panic!(
-                                "Cannot add the test harness to the output directory. Details:\n{}",
-                                err
-                            );
-                        }
-                        ExpectedOutputNotUtf8(_) => {
-                            panic!("Expected output is not valid utf8");
-                        }
-                        CopyingExpectedOutput(err) => {
-                            panic!(
-                                "The expected output exists but cannot be copied. Details:\n{}",
-                                err
-                            );
-                        }
-                        Runtime(output) => {
-                            eprintln!("{}", OutputPrinter(&output));
-                            eprintln!(
-                                "\n\nTo inspect the built files that caused this error see:\n  {}",
-                                out_dir.display()
-                            )
-                        }
-                        CannotFindExpectedOutput => {
-                            eprintln!(
-                                "{}\n{}",
-                                "Each suite must contain a file 'output.txt', containing the text that",
-                                "the suite should write to stdout"
-                            );
-                        }
-                        OutputProduced(output) => {
-                            eprintln!(
-                                "The suite ran without error but produced the following output!:\n{}", OutputPrinter(&output)
-                            );
-                        }
-                    }
-                    NonZeroI32::new(2)
-                }
+                NonZeroI32::new(1)
             }
-        }
+            lib::Error::Runner(err) => {
+                use lib::run::Error::*;
+                eprintln!("The suite {} failed at run time.", suite.display());
+                match err {
+                    NodeNotFound(err) => {
+                        eprintln!("Could not find node executable to run generated Javascript. Details:\n{}", err);
+                    }
+                    SuiteDoesNotExist => {
+                        panic!("Path was not suite - should have been checked already thogu?");
+                    }
+                    NodeProcess(err) => {
+                        panic!("The node process errored unexpectedly:\n{}", err);
+                    }
+                    WritingHarness(err) => {
+                        panic!(
+                            "Cannot add the test harness to the output directory. Details:\n{}",
+                            err
+                        );
+                    }
+                    ExpectedOutputNotUtf8(_) => {
+                        panic!("Expected output is not valid utf8");
+                    }
+                    CopyingExpectedOutput(err) => {
+                        panic!(
+                            "The expected output exists but cannot be copied. Details:\n{}",
+                            err
+                        );
+                    }
+                    Runtime(output) => {
+                        eprintln!("{}", OutputPrinter(&output));
+                        eprintln!(
+                            "\n\nTo inspect the built files that caused this error see:\n  {}",
+                            out_dir.display()
+                        )
+                    }
+                    CannotFindExpectedOutput => {
+                        eprintln!(
+                            "{}\n{}",
+                            "Each suite must contain a file 'output.txt', containing the text that",
+                            "the suite should write to stdout"
+                        );
+                    }
+                    OutputProduced(output) => {
+                        eprintln!(
+                            "The suite ran without error but produced the following output!:\n{}",
+                            OutputPrinter(&output)
+                        );
+                    }
+                }
+                NonZeroI32::new(2)
+            }
+        },
         Ok(()) => None,
+    };
+    if failure_allowed {
+        if let Some(_) = exit_code {
+            eprintln!("Failure allowed, continuing...");
+            None
+        } else {
+            eprintln!("Suite was expected to fail but did not!");
+            NonZeroI32::new(3)
+        }
+    } else {
+        exit_code
     }
 }
 
@@ -235,10 +265,6 @@ where
     None
 }
 
-fn get_absolute_path_if_possible(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
-}
-
 fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
     let CliInstructions { config, task } = instructions;
     let welcome_message = "Elm Torture - stress tests for an elm compiler";
@@ -253,10 +279,7 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
         CliTask::RunSuite { suite, out_dir } => {
             println!("{}", welcome_message);
             println!();
-            println!(
-                "Running SSCCE {}:",
-                get_absolute_path_if_possible(&suite).display()
-            );
+            println!("Running SSCCE {}:", suite.display());
             println!();
             run_suite(suite, out_dir.as_ref().map(PathBuf::as_ref), &config)
         }
@@ -274,7 +297,7 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
                 );
             };
             for path in suites.iter() {
-                println!("  {}", get_absolute_path_if_possible(&path).display());
+                println!("  {}", path.display());
             }
             println!();
             iterate_till_some(suites.iter(), |suite| run_suite(suite, None, &config))
