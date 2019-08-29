@@ -1,0 +1,8 @@
+{
+    "ports": {
+        "write": [
+            "load",
+            "tick"
+        ]
+    }
+}

@@ -1,15 +1,13 @@
-port module Util.Programs exposing (noop, print)
+module Util.Programs exposing (noop, print)
 
 import Platform
-
-
-port write : String -> Cmd never
+import Util.Cmds
 
 
 print : String -> Platform.Program () () a
 print string =
     Platform.worker
-        { init = \() -> ( (), write string )
+        { init = \() -> ( (), Util.Cmds.write string )
         , update = \_ () -> ( (), Cmd.none )
         , subscriptions = \() -> Sub.none
         }
