@@ -1,0 +1,21 @@
+name: Rust
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macOS-latest, windows-latest]
+        
+    steps:
+    - uses: actions/checkout@v1
+    - name: Build
+      run: cargo build --verbose
+    - name: Basic torture run
+      run: cargo run -- --suites suites --config ./ci/config/basic.json
+    - name: Debug torture run
+      run: cargo run -- --suites suites --config ./ci/config/debug.json
+    - name: Optimized torture run
+      run: cargo run -- --suites suites --config ./ci/config/optimise.json
