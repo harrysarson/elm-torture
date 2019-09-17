@@ -15,10 +15,7 @@ jobs:
         run: cargo build --verbose
       - name: Basic torture run
         run: cargo run -- --suites suite --config ./ci/config/basic.json
-        continue-on-error: true
       - name: Debug torture run
         run: cargo run -- --suites suite --config ./ci/config/debug.json
-        continue-on-error: true
       - name: Optimized torture run
         run: cargo run -- --suites suite --config ./ci/config/optimise.json
-        continue-on-error: true
