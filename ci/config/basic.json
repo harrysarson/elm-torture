@@ -3,7 +3,7 @@
   "node": "node",
   "args": [],
   "allowed_failures": [
-    "./issues/1246",
-    "./issues/1776"
+    "../../suite/issues/1246",
+    "../../suite/issues/1776"
   ]
 }
