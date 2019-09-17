@@ -149,10 +149,17 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
     });
     println!("Testing suite: {:?}...", suite);
 
-    // let out_dir = env::current_dir().unwrap().join("tmp");
-    // fs::create_dir(&out_dir).unwrap_or_default();
-    let out_dir = provided_out_dir.map_or_else(env::temp_dir, Path::to_path_buf);
-    let exit_code = match lib::run_suite(&suite, &out_dir, &config) {
+    let (out_dir_temp, out_dir_ref) = if let Some(dir) = provided_out_dir {
+        (None, dir.to_path_buf())
+    } else {
+        let dir = tempfile::Builder::new()
+            .prefix("elm-torture")
+            .tempdir()
+            .expect("Should be able to create a temp_file");
+        let path = dir.path().to_path_buf();
+        (Some(dir), path)
+    };
+    let exit_code = match lib::run_suite(&suite, &out_dir_ref, &config) {
         Err(err) => match err {
             lib::Error::Compiler(err) => {
                 use compile::Error::*;
@@ -179,7 +186,7 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                                     eprintln!("{} must either be a directory or a path where elm-torture can create one!",
                                     dir.display()),
                                 None =>
-                                    panic!("Invalid tempory directory: {}", out_dir.display()),
+                                    panic!("Invalid tempory directory: {}", out_dir_ref.display()),
                             }
                         }
                     }
@@ -217,8 +224,11 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                         eprintln!("{}", OutputPrinter(&output));
                         eprintln!(
                             "\n\nTo inspect the built files that caused this error see:\n  {}",
-                            out_dir.display()
-                        )
+                            out_dir_ref.display()
+                        );
+                        if let Some(tempdir) = out_dir_temp {
+                            tempdir.into_path();
+                        }
                     }
                     CannotFindExpectedOutput => {
                         eprintln!(
@@ -240,7 +250,7 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
         Ok(()) => None,
     };
     if failure_allowed {
-        if let Some(_) = exit_code {
+        if exit_code.is_some() {
             eprintln!("Failure allowed, continuing...");
             None
         } else {
