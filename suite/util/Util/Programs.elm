@@ -1,22 +1,23 @@
-module Util.Programs exposing (noop, print)
+module Util.Programs exposing (noop, print, sendCmd)
 
 import Platform
 import Util.Cmds
 
 
-print : String -> Platform.Program () () a
-print string =
+sendCmd : Cmd a -> Platform.Program () () a
+sendCmd cmd =
     Platform.worker
-        { init = \() -> ( (), Util.Cmds.write string )
+        { init = \() -> ( (), cmd )
         , update = \_ () -> ( (), Cmd.none )
         , subscriptions = \() -> Sub.none
         }
+
+
+print : String -> Platform.Program () () a
+print string =
+    sendCmd (Util.Cmds.write string)
 
 
 noop : Platform.Program () () a
 noop =
-    Platform.worker
-        { init = \() -> ( (), Cmd.none )
-        , update = \_ () -> ( (), Cmd.none )
-        , subscriptions = \() -> Sub.none
-        }
+    sendCmd Cmd.none
