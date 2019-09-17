@@ -8,7 +8,3 @@ test1 : ()
 test1 =
     ()
 
-
-main : Platform.Program () () ()
-main =
-    Util.Programs.noop

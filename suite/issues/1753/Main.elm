@@ -1,8 +1,6 @@
 module Main exposing (main)
 
 import Array exposing (Array)
-import Browser
-import Platform
 import Util.Programs
 
 
