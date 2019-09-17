@@ -13,6 +13,8 @@ jobs:
       - uses: actions/checkout@v1
       - name: Build
         run: cargo build --verbose
+      - name: Install elm
+        run: npm i -g elm@0.19.0-no-deps
       - name: Basic torture run
         run: cargo run -- --suites suite --config ./ci/config/basic.json
       - name: Debug torture run
