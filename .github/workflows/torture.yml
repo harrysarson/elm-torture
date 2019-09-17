@@ -24,4 +24,4 @@ jobs:
       - name: Debug torture run
         run: cargo run -- --suites suite --config ./ci/config/debug.json
       - name: Optimized torture run
-        run: cargo run -- --suites suite --config ./ci/config/optimise.json
+        run: cargo run -- --suites suite --config ./ci/config/optimize.json
