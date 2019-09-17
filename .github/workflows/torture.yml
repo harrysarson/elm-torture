@@ -1,4 +1,4 @@
-name: Rust
+name: Torture
 
 on: [push]
 
