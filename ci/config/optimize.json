@@ -4,6 +4,7 @@
   "args": ["--optimize"],
   "allowed_failures": [
     "../../suite/issues/1246",
-    "../../suite/issues/1776"
+    "../../suite/issues/1776",
+    "../../suite/numeric-package"
   ]
 }
