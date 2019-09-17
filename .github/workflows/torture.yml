@@ -15,7 +15,7 @@ jobs:
       - name: Build
         run: cargo build --verbose
       - name: Allow npm global installs
-        run: sudo chown -R $USER /usr/local/lib/node_modules
+        run: sudo chown -R $USER /usr/local/lib/node_modules && sudo chown $USER /usr/local/bin
       - name: Install elm
         run: npm i -g elm@0.19.0-no-deps
       - name: Basic torture run
