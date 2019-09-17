@@ -1,0 +1,9 @@
+{
+  "elm_compiler": "elm",
+  "node": "node",
+  "args": ["--debug"],
+  "allowed_failures": [
+    "./issues/1246",
+    "./issues/1776"
+  ]
+}
