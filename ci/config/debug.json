@@ -5,6 +5,7 @@
   "allowed_failures": [
     "../../suite/issues/1246",
     "../../suite/issues/1776",
+    "../../suite/issues/17356",
     "../../suite/numeric-package"
   ]
 }
