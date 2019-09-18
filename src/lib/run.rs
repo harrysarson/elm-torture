@@ -44,7 +44,7 @@ pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Error> {
         format!(
             r#"
 const {{ Elm }} = require('./elm.js');
-const expectedOutput = JSON.parse(`{}`);
+const expectedOutput = JSON.parse(String.raw`{}`);
 {}
 
 module.exports(Elm, expectedOutput);
