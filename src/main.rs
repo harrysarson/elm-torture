@@ -7,7 +7,6 @@ use clap::Arg;
 use lib::compile;
 use lib::config;
 use lib::config::Config;
-use std::env;
 use std::fmt;
 use std::fs::File;
 use std::num::NonZeroI32;
@@ -138,10 +137,22 @@ impl<'a> fmt::Display for OutputPrinter<'a> {
 }
 
 fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> Option<NonZeroI32> {
+    if !suite.exists() {
+        eprintln!("The provided path to a suite: \"{}\"  does not exist", suite.display());
+        return NonZeroI32::new(3);
+    }
+    if !suite.is_dir() {
+        eprintln!("The provided path to a suite: \"{}\" exists but is not a directory", suite.display());
+        return NonZeroI32::new(3);
+    }
+    if !suite.join("elm.json").exists() {
+        eprintln!("The suite directory: \"{}\" is not an Elm application or package", suite.display());
+        return NonZeroI32::new(3);
+    }
     let failure_allowed = config.allowed_failures.iter().any(|p| {
         if p.exists() {
-            same_file::is_same_file(suite, p).unwrap_or_else(|_| {
-                panic!("Error when comparing the paths {:?} and {:?}", suite, p)
+            same_file::is_same_file(suite, p).unwrap_or_else(|e| {
+                panic!("Error when comparing the paths {:?} and {:?}: {:?}", suite, p, e)
             })
         } else {
             false
@@ -177,7 +188,7 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                             eprintln!("Compilation failed!\n{}", OutputPrinter(&output));
                         }
                         SuiteDoesNotExist => {
-                            eprintln!("{} is not an elm application or package!", suite.display());
+                            panic!("Path was not suite - this should have been checked already!");
                         }
 
                         OutDirIsNotDir => {
@@ -200,7 +211,7 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
                         eprintln!("Could not find node executable to run generated Javascript. Details:\n{}", err);
                     }
                     SuiteDoesNotExist => {
-                        panic!("Path was not suite - should have been checked already thogu?");
+                        panic!("Path was not suite - this should have been checked already!");
                     }
                     NodeProcess(err) => {
                         panic!("The node process errored unexpectedly:\n{}", err);
