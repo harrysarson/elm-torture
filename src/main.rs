@@ -5,12 +5,12 @@ mod lib;
 use clap::App;
 use clap::Arg;
 use lib::compile;
-use lib::run;
-use std::mem;
 use lib::config;
 use lib::config::Config;
+use lib::run;
 use std::fmt;
 use std::fs::File;
+use std::mem;
 use std::num::NonZeroI32;
 use std::path::Path;
 use std::path::PathBuf;
@@ -148,8 +148,8 @@ impl<'a> OutDir<'a> {
     fn path(&self) -> &Path {
         match self {
             Self::Provided(p) => p,
-            Self::Tempory(ref p) =>  p.path(),
-            Self::Persistent(ref p) =>  p,
+            Self::Tempory(ref p) => p.path(),
+            Self::Persistent(ref p) => p,
         }
     }
 
@@ -176,39 +176,48 @@ impl<'a> OutDir<'a> {
 fn display_compiler_error<'a>(err: &compile::Error, suite: &Path, out_dir: &OutDir<'a>) {
     use compile::Error::*;
     match err {
-            CompilerNotFound(err) => {
-                eprintln!("Could not find elm compiler executable! Details:\n{}", err);
-            }
-            ReadingTargets(err) => {
-                eprintln!("targets.txt found in suite {} but could not be read!. Details:\n{}", &suite.display(), err);
-            }
-            Process(err) => {
-                panic!("Failed to execute compiler! Details:\n{}", err);
-            }
-            Compiler(output) | CompilerStdErrNotEmpty(output) => {
-                eprintln!("Compilation failed!\n{}", OutputPrinter(&output));
-            }
-            SuiteDoesNotExist => {
-                panic!("Path was not suite - this should have been checked already!");
-            }
+        CompilerNotFound(err) => {
+            eprintln!("Could not find elm compiler executable! Details:\n{}", err);
+        }
+        ReadingTargets(err) => {
+            eprintln!(
+                "targets.txt found in suite {} but could not be read!. Details:\n{}",
+                &suite.display(),
+                err
+            );
+        }
+        Process(err) => {
+            panic!("Failed to execute compiler! Details:\n{}", err);
+        }
+        Compiler(output) | CompilerStdErrNotEmpty(output) => {
+            eprintln!("Compilation failed!\n{}", OutputPrinter(&output));
+        }
+        SuiteDoesNotExist => {
+            panic!("Path was not suite - this should have been checked already!");
+        }
 
-            OutDirIsNotDir => {
-                if out_dir.is_tempory() {
-                    panic!("Invalid tempory directory: {}", out_dir.path().display());
-                } else {
-                    eprintln!("{} must either be a directory or a path where elm-torture can create one!",
-                        out_dir.path().display());
-                }
+        OutDirIsNotDir => {
+            if out_dir.is_tempory() {
+                panic!("Invalid tempory directory: {}", out_dir.path().display());
+            } else {
+                eprintln!(
+                    "{} must either be a directory or a path where elm-torture can create one!",
+                    out_dir.path().display()
+                );
             }
         }
+    }
 }
 
-fn display_runner_error<'a> (err: &run::Error, suite: &Path, out_dir: &mut OutDir<'a>) {
+fn display_runner_error<'a>(err: &run::Error, suite: &Path, out_dir: &mut OutDir<'a>) {
     use run::Error::*;
     eprintln!("The suite {} failed at run time.", suite.display());
     match err {
         NodeNotFound(err) => {
-            eprintln!("Could not find node executable to run generated Javascript. Details:\n{}", err);
+            eprintln!(
+                "Could not find node executable to run generated Javascript. Details:\n{}",
+                err
+            );
         }
         SuiteDoesNotExist => {
             panic!("Path was not suite - this should have been checked already!");
