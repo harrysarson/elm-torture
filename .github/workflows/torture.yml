@@ -42,11 +42,9 @@ jobs:
         run: ./target/debug/elm-torture --suites suite --config ./.github/config/basic.json
 
       - name: Debug torture run
-        uses: actions-rs/cargo@v1
         run: ./target/debug/elm-torture --suites suite --config ./.github/config/debug.json
 
       - name: Optimized torture run
-        uses: actions-rs/cargo@v1
         run: ./target/debug/elm-torture --suites suite --config ./.github/config/optimize.json
 
       - uses: actions-rs/cargo@v1
