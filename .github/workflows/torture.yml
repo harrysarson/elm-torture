@@ -18,7 +18,7 @@ jobs:
         run: sudo chown -R $USER /usr/local/lib/node_modules && sudo chown $USER /usr/local/bin
         if: runner.os != 'Windows'
       - name: Install elm
-        run: npm i -g elm@0.19.0-no-deps
+        run: npm i -g elm@0.19.1
       - name: Basic torture run
         run: cargo run -- --suites suite --config ./.github/config/basic.json
       - name: Debug torture run
