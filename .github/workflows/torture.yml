@@ -34,10 +34,10 @@ jobs:
           command: build
 
       - name: Basic torture run
-        run: ./target/debug/elm-torture --suites suite --config ./.github/config/basic.json
+        run: make run-basic
 
       - name: Debug torture run
-        run: ./target/debug/elm-torture --suites suite --config ./.github/config/debug.json
+        run: make run-debug
 
       - name: Optimized torture run
-        run: ./target/debug/elm-torture --suites suite --config ./.github/config/optimize.json
+        run: make run-optimize
