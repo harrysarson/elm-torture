@@ -376,7 +376,7 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
             for suite in suites.iter() {
                 code |= run_suite(suite, None, &config).map_or(0, NonZeroI32::get);
             }
-            return NonZeroI32::new(code);
+            NonZeroI32::new(code)
         }
     }
 }
