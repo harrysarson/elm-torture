@@ -336,19 +336,6 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
     }
 }
 
-fn iterate_till_some<U, It, F>(iter: It, func: F) -> Option<U>
-where
-    It: Iterator,
-    F: Fn(It::Item) -> Option<U>,
-{
-    for item in iter {
-        if let Some(val) = func(item) {
-            return Some(val);
-        }
-    }
-    None
-}
-
 fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
     let CliInstructions { config, task } = instructions;
     let welcome_message = "Elm Torture - stress tests for an elm compiler";
@@ -384,7 +371,12 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
                 println!("  {}", path.display());
             }
             println!();
-            iterate_till_some(suites.iter(), |suite| run_suite(suite, None, &config))
+
+            let mut code = 0;
+            for suite in suites.iter() {
+                code |= run_suite(suite, None, &config).map_or(0, NonZeroI32::get);
+            }
+            return NonZeroI32::new(code);
         }
     }
 }
