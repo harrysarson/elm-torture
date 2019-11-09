@@ -138,6 +138,7 @@ impl<'a> fmt::Display for OutputPrinter<'a> {
     }
 }
 
+#[derive(Debug)]
 enum OutDir<'a> {
     Provided(&'a Path),
     Tempory(tempfile::TempDir),
@@ -173,94 +174,129 @@ impl<'a> OutDir<'a> {
     }
 }
 
-fn display_compiler_error<'a>(err: &compile::Error, suite: &Path, out_dir: &OutDir<'a>) {
-    use compile::Error::*;
-    match err {
-        CompilerNotFound(err) => {
-            eprintln!("Could not find elm compiler executable! Details:\n{}", err);
-        }
-        ReadingTargets(err) => {
-            eprintln!(
-                "targets.txt found in suite {} but could not be read!. Details:\n{}",
-                &suite.display(),
-                err
-            );
-        }
-        Process(err) => {
-            panic!("Failed to execute compiler! Details:\n{}", err);
-        }
-        Compiler(output) | CompilerStdErrNotEmpty(output) => {
-            eprintln!("Compilation failed!\n{}", OutputPrinter(&output));
-        }
-        SuiteDoesNotExist => {
-            panic!("Path was not suite - this should have been checked already!");
-        }
+struct CompilerErrorDisplay<'a> {
+    err: &'a compile::Error,
+    suite: &'a Path,
+    out_dir: &'a OutDir<'a>,
+}
 
-        OutDirIsNotDir => {
-            if out_dir.is_tempory() {
-                panic!("Invalid tempory directory: {}", out_dir.path().display());
-            } else {
-                eprintln!(
-                    "{} must either be a directory or a path where elm-torture can create one!",
-                    out_dir.path().display()
-                );
+impl<'a> fmt::Display for CompilerErrorDisplay<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use compile::Error::*;
+        match self.err {
+            CompilerNotFound(err) => write!(
+                f,
+                "Could not find elm compiler executable! Details:\n{}",
+                err
+            ),
+            ReadingTargets(err) => write!(
+                f,
+                "targets.txt found in suite {} but could not be read!. Details:\n{}",
+                self.suite.display(),
+                err
+            ),
+            Process(err) => panic!("Failed to execute compiler! Details:\n{}", err),
+            Compiler(output) | CompilerStdErrNotEmpty(output) => {
+                write!(f, "Compilation failed!\n{}", OutputPrinter(&output))
+            }
+            SuiteDoesNotExist => {
+                panic!("Path was not suite - this should have been checked already!")
+            }
+
+            OutDirIsNotDir => {
+                if self.out_dir.is_tempory() {
+                    panic!(
+                        "Invalid tempory directory: {}",
+                        self.out_dir.path().display()
+                    )
+                } else {
+                    write!(
+                        f,
+                        "{} must either be a directory or a path where elm-torture can create one!",
+                        self.out_dir.path().display()
+                    )
+                }
             }
         }
     }
 }
 
-fn display_runner_error<'a>(err: &run::Error, suite: &Path, out_dir: &mut OutDir<'a>) {
-    use run::Error::*;
-    eprintln!("The suite {} failed at run time.", suite.display());
-    match err {
-        NodeNotFound(err) => {
-            eprintln!(
+fn display_compiler_error<'a>(
+    err: &'a compile::Error,
+    suite: &'a Path,
+    out_dir: &'a OutDir<'a>,
+) -> CompilerErrorDisplay<'a> {
+    CompilerErrorDisplay {
+        err,
+        suite,
+        out_dir,
+    }
+}
+
+struct RuntimeErrorDisplay<'a> {
+    err: &'a run::Error,
+    suite: &'a Path,
+    out_dir: &'a Path,
+}
+
+impl<'a> fmt::Display for RuntimeErrorDisplay<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use run::Error::*;
+        write!(f, "The suite {} failed at run time.", self.suite.display())?;
+        match self.err {
+            NodeNotFound(err) => write!(
+                f,
                 "Could not find node executable to run generated Javascript. Details:\n{}",
                 err
-            );
-        }
-        SuiteDoesNotExist => {
-            panic!("Path was not suite - this should have been checked already!");
-        }
-        NodeProcess(err) => {
-            panic!("The node process errored unexpectedly:\n{}", err);
-        }
-        WritingHarness(err) => {
-            panic!(
+            ),
+            SuiteDoesNotExist => {
+                panic!("Path was not suite - this should have been checked already!")
+            }
+            NodeProcess(err) => panic!("The node process errored unexpectedly:\n{}", err),
+            WritingHarness(err) => panic!(
                 "Cannot add the test harness to the output directory. Details:\n{}",
                 err
-            );
-        }
-        ExpectedOutputNotUtf8(_) => {
-            panic!("Expected output is not valid utf8");
-        }
-        CopyingExpectedOutput(err) => {
-            panic!(
+            ),
+            ExpectedOutputNotUtf8(_) => panic!("Expected output is not valid utf8"),
+            CopyingExpectedOutput(err) => panic!(
                 "The expected output exists but cannot be copied. Details:\n{}",
                 err
-            );
-        }
-        Runtime(output) => {
-            eprintln!("{}", OutputPrinter(&output));
-            eprintln!(
-                "\n\nTo inspect the built files that caused this error see:\n  {}",
-                out_dir.path().display()
-            );
-            out_dir.persist();
-        }
-        CannotFindExpectedOutput => {
-            eprintln!(
-                "{}\n{}",
-                "Each suite must contain a file 'output.txt', containing the text that",
-                "the suite should write to stdout"
-            );
-        }
-        OutputProduced(output) => {
-            eprintln!(
+            ),
+            Runtime(output) => {
+                write!(f, "{}", OutputPrinter(&output))?;
+                write!(
+                    f,
+                    "\n\nTo inspect the built files that caused this error see:\n  {}",
+                    self.out_dir.display()
+                )
+            }
+            CannotFindExpectedOutput => write!(
+                f,
+                "{}",
+                [
+                    "Each suite must contain a file 'output.txt', containing the text that",
+                    "the suite should write to stdout"
+                ]
+                .join("\n")
+            ),
+            OutputProduced(output) => write!(
+                f,
                 "The suite ran without error but produced the following output!:\n{}",
                 OutputPrinter(&output)
-            );
+            ),
         }
+    }
+}
+
+fn display_runner_error<'a>(
+    err: &'a run::Error,
+    suite: &'a Path,
+    out_dir: &'a Path
+) -> RuntimeErrorDisplay<'a> {
+    RuntimeErrorDisplay {
+        err,
+        suite,
+        out_dir,
     }
 }
 
@@ -313,11 +349,14 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
     let exit_code = match lib::run_suite(&suite, out_dir.path(), &config) {
         Err(err) => match err {
             lib::Error::Compiler(err) => {
-                display_compiler_error(&err, &suite, &out_dir);
+                eprintln!("{}", display_compiler_error(&err, &suite, &out_dir));
                 NonZeroI32::new(1)
             }
             lib::Error::Runner(err) => {
-                display_runner_error(&err, &suite, &mut out_dir);
+                if let run::Error::Runtime(_) = err {
+                    out_dir.persist()
+                };
+                eprintln!("{}", display_runner_error(&err, &suite, out_dir.path());
                 NonZeroI32::new(2)
             }
         },
