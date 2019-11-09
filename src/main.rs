@@ -174,13 +174,13 @@ impl<'a> OutDir<'a> {
     }
 }
 
-struct CompilerErrorDisplay<'a> {
+struct CompilerError<'a> {
     err: &'a compile::Error,
     suite: &'a Path,
     out_dir: &'a OutDir<'a>,
 }
 
-impl<'a> fmt::Display for CompilerErrorDisplay<'a> {
+impl<'a> fmt::Display for CompilerError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use compile::Error::*;
         match self.err {
@@ -225,21 +225,21 @@ fn display_compiler_error<'a>(
     err: &'a compile::Error,
     suite: &'a Path,
     out_dir: &'a OutDir<'a>,
-) -> CompilerErrorDisplay<'a> {
-    CompilerErrorDisplay {
+) -> CompilerError<'a> {
+    CompilerError {
         err,
         suite,
         out_dir,
     }
 }
 
-struct RuntimeErrorDisplay<'a> {
+struct RuntimeError<'a> {
     err: &'a run::Error,
     suite: &'a Path,
     out_dir: &'a Path,
 }
 
-impl<'a> fmt::Display for RuntimeErrorDisplay<'a> {
+impl<'a> fmt::Display for RuntimeError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use run::Error::*;
         write!(f, "The suite {} failed at run time.", self.suite.display())?;
@@ -291,36 +291,94 @@ impl<'a> fmt::Display for RuntimeErrorDisplay<'a> {
 fn display_runner_error<'a>(
     err: &'a run::Error,
     suite: &'a Path,
-    out_dir: &'a Path
-) -> RuntimeErrorDisplay<'a> {
-    RuntimeErrorDisplay {
+    out_dir: &'a Path,
+) -> RuntimeError<'a> {
+    RuntimeError {
         err,
         suite,
         out_dir,
     }
 }
 
-fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> Option<NonZeroI32> {
+struct SuiteFailure<'a> {
+    suite: &'a Path,
+    outdir: OutDir<'a>,
+    reason: lib::Error,
+}
+
+enum SuiteError<'a> {
+    SuiteNotExist(&'a Path),
+    SuiteNotDir(&'a Path),
+    SuiteNotElm(&'a Path),
+    Failure {
+        allowed: bool,
+        reason: SuiteFailure<'a>,
+    },
+    ExpectedFailure,
+}
+
+impl<'a> fmt::Display for SuiteError<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use SuiteError::*;
+
+        match self {
+            SuiteNotExist(suite) => write!(
+                f,
+                "The provided path to a suite: \"{}\"  does not exist",
+                suite.display()
+            ),
+
+            SuiteNotDir(suite) => write!(
+                f,
+                "The provided path to a suite: \"{}\" exists but is not a directory",
+                suite.display()
+            ),
+
+            SuiteNotElm(suite) => write!(
+                f,
+                "The suite directory: \"{}\" is not an Elm application or package",
+                suite.display()
+            ),
+
+            Failure { allowed, reason } => {
+                match &reason.reason {
+                    lib::Error::Compiler(err) => write!(
+                        f,
+                        "{}",
+                        display_compiler_error(&err, &reason.suite, &reason.outdir)
+                    ),
+
+                    lib::Error::Runner(err) => write!(
+                        f,
+                        "{}",
+                        display_runner_error(&err, &reason.suite, reason.outdir.path())
+                    ),
+                }?;
+                if *allowed {
+                    write!(f, "Failure allowed, continuing...")
+                } else {
+                    Ok(())
+                }
+            }
+
+            ExpectedFailure => write!(f, "Suite was expected to fail but did not!"),
+        }
+    }
+}
+
+fn run_suite<'a>(
+    suite: &'a Path,
+    provided_out_dir: Option<&'a Path>,
+    config: &Config,
+) -> Result<(), SuiteError<'a>> {
     if !suite.exists() {
-        eprintln!(
-            "The provided path to a suite: \"{}\"  does not exist",
-            suite.display()
-        );
-        return NonZeroI32::new(3);
+        return Err(SuiteError::SuiteNotExist(suite));
     }
     if !suite.is_dir() {
-        eprintln!(
-            "The provided path to a suite: \"{}\" exists but is not a directory",
-            suite.display()
-        );
-        return NonZeroI32::new(3);
+        return Err(SuiteError::SuiteNotDir(suite));
     }
     if !suite.join("elm.json").exists() {
-        eprintln!(
-            "The suite directory: \"{}\" is not an Elm application or package",
-            suite.display()
-        );
-        return NonZeroI32::new(3);
+        return Err(SuiteError::SuiteNotElm(suite));
     }
     let failure_allowed = config.allowed_failures.iter().any(|p| {
         if p.exists() {
@@ -334,7 +392,6 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
             false
         }
     });
-    println!("Testing suite: {:?}...", suite);
 
     let mut out_dir = if let Some(dir) = provided_out_dir {
         OutDir::Provided(dir)
@@ -346,32 +403,47 @@ fn run_suite(suite: &Path, provided_out_dir: Option<&Path>, config: &Config) -> 
         OutDir::Tempory(dir)
     };
 
-    let exit_code = match lib::run_suite(&suite, out_dir.path(), &config) {
-        Err(err) => match err {
-            lib::Error::Compiler(err) => {
-                eprintln!("{}", display_compiler_error(&err, &suite, &out_dir));
-                NonZeroI32::new(1)
-            }
-            lib::Error::Runner(err) => {
-                if let run::Error::Runtime(_) = err {
-                    out_dir.persist()
-                };
-                eprintln!("{}", display_runner_error(&err, &suite, out_dir.path());
-                NonZeroI32::new(2)
-            }
-        },
-        Ok(()) => None,
+    let run_result = lib::run_suite(&suite, out_dir.path(), &config);
+
+    if let Err(lib::Error::Runner(run::Error::Runtime(_))) = run_result {
+        out_dir.persist()
     };
-    if failure_allowed {
-        if exit_code.is_some() {
-            eprintln!("Failure allowed, continuing...");
-            None
-        } else {
-            eprintln!("Suite was expected to fail but did not!");
-            NonZeroI32::new(3)
-        }
+
+    if failure_allowed && run_result.is_ok() {
+        Err(SuiteError::ExpectedFailure)
     } else {
-        exit_code
+        run_result.map_err(|err| SuiteError::Failure {
+            allowed: failure_allowed,
+            reason: SuiteFailure {
+                outdir: out_dir,
+                suite,
+                reason: err,
+            },
+        })
+    }
+}
+
+fn get_exit_code(suite_result: &Result<(), SuiteError>) -> i32 {
+    use SuiteError::*;
+
+    match suite_result {
+        Err(ref suite_error) => match suite_error {
+            SuiteNotExist(_) | SuiteNotDir(_) | SuiteNotElm(_) => 0x28,
+
+            Failure { reason, allowed } => {
+                if *allowed {
+                    0
+                } else {
+                    match reason.reason {
+                        lib::Error::Compiler(_) => 0x21,
+                        lib::Error::Runner(_) => 0x22,
+                    }
+                }
+            }
+
+            ExpectedFailure => 0x24,
+        },
+        Ok(()) => 0,
     }
 }
 
@@ -391,7 +463,11 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
             println!();
             println!("Running SSCCE {}:", suite.display());
             println!();
-            run_suite(suite, out_dir.as_ref().map(PathBuf::as_ref), &config)
+            let suite_result = run_suite(suite, out_dir.as_ref().map(PathBuf::as_ref), &config);
+            if let Err(ref e) = suite_result {
+                println!("{}", e);
+            }
+            NonZeroI32::new(get_exit_code(&suite_result))
         }
         CliTask::RunSuites(suite_dir) => {
             let suites =
@@ -413,7 +489,11 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
 
             let mut code = 0;
             for suite in suites.iter() {
-                code |= run_suite(suite, None, &config).map_or(0, NonZeroI32::get);
+                let suite_result = run_suite(suite, None, &config);
+                if let Err(ref e) = suite_result {
+                    println!("{}", e);
+                }
+                code |= get_exit_code(&suite_result);
             }
             NonZeroI32::new(code)
         }
