@@ -246,14 +246,12 @@ fn display_compiler_error<'a>(
 
 struct RuntimeError<'a> {
     err: &'a run::Error,
-    suite: &'a Path,
     out_dir: &'a Path,
 }
 
 impl<'a> fmt::Display for RuntimeError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use run::Error::*;
-        write!(f, "The suite {} failed at run time.", self.suite.display())?;
         match self.err {
             NodeNotFound(err) => write!(
                 f,
@@ -299,16 +297,8 @@ impl<'a> fmt::Display for RuntimeError<'a> {
     }
 }
 
-fn display_runner_error<'a>(
-    err: &'a run::Error,
-    suite: &'a Path,
-    out_dir: &'a Path,
-) -> RuntimeError<'a> {
-    RuntimeError {
-        err,
-        suite,
-        out_dir,
-    }
+fn display_runner_error<'a>(err: &'a run::Error, out_dir: &'a Path) -> RuntimeError<'a> {
+    RuntimeError { err, out_dir }
 }
 
 struct SuiteFailure<'a> {
@@ -355,14 +345,20 @@ impl<'a> fmt::Display for SuiteError<'a> {
                 match &reason.reason {
                     lib::Error::Compiler(err) => write!(
                         f,
-                        "{}",
-                        display_compiler_error(&err, &reason.suite, &reason.outdir)
+                        "Failed to compile suite {}.\n{}",
+                        &reason.suite.display(),
+                        indented::indented(display_compiler_error(
+                            &err,
+                            &reason.suite,
+                            &reason.outdir
+                        ))
                     ),
 
                     lib::Error::Runner(err) => write!(
                         f,
-                        "{}",
-                        display_runner_error(&err, &reason.suite, reason.outdir.path())
+                        "Suite {} failed at run time.\n{}",
+                        &reason.suite.display(),
+                        indented::indented(display_runner_error(&err, reason.outdir.path()))
                     ),
                 }?;
                 if *allowed {
