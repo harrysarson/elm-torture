@@ -9,7 +9,9 @@ use lib::config;
 use lib::config::Config;
 use lib::run;
 use std::fmt;
+use std::fs;
 use std::fs::File;
+use std::io;
 use std::mem;
 use std::num::NonZeroI32;
 use std::path::Path;
@@ -28,6 +30,7 @@ enum CliTask {
 
 struct CliInstructions {
     config: config::Config,
+    clear_elm_stuff: bool,
     task: CliTask,
 }
 
@@ -71,7 +74,14 @@ fn get_cli_task() -> CliInstructions {
                 .long("showConfig")
                 .help("Dump the configuration"),
         )
+        .arg(
+            Arg::with_name("clear_elm_stuff")
+                .long("clear-elm-stuff")
+                .help("Delete the elm-stuff directory before running suite"),
+        )
         .get_matches();
+
+    let clear_elm_stuff = matches.is_present("clear_elm_stuff");
 
     let config = {
         let config_file = matches.value_of_os("config");
@@ -95,6 +105,7 @@ fn get_cli_task() -> CliInstructions {
 
     CliInstructions {
         config,
+        clear_elm_stuff,
         task: if matches.is_present("show_config") {
             CliTask::DumpConfig
         } else if let Some(suites) = matches.value_of("suites") {
@@ -369,6 +380,7 @@ impl<'a> fmt::Display for SuiteError<'a> {
 fn run_suite<'a>(
     suite: &'a Path,
     provided_out_dir: Option<&'a Path>,
+    clear_elm_stuff: bool,
     config: &Config,
 ) -> Result<(), SuiteError<'a>> {
     if !suite.exists() {
@@ -392,6 +404,17 @@ fn run_suite<'a>(
             false
         }
     });
+    if clear_elm_stuff {
+        fs::remove_dir_all(suite.join("elm-stuff"))
+            .or_else(|e| {
+                if e.kind() == io::ErrorKind::NotFound {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            })
+            .expect("Could not delete elm-stuff directory");
+    }
 
     let mut out_dir = if let Some(dir) = provided_out_dir {
         OutDir::Provided(dir)
@@ -448,7 +471,11 @@ fn get_exit_code(suite_result: &Result<(), SuiteError>) -> i32 {
 }
 
 fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
-    let CliInstructions { config, task } = instructions;
+    let CliInstructions {
+        config,
+        clear_elm_stuff,
+        task,
+    } = instructions;
     let welcome_message = "Elm Torture - stress tests for an elm compiler";
     match task {
         CliTask::DumpConfig => {
@@ -463,7 +490,12 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
             println!();
             println!("Running SSCCE {}:", suite.display());
             println!();
-            let suite_result = run_suite(suite, out_dir.as_ref().map(PathBuf::as_ref), &config);
+            let suite_result = run_suite(
+                suite,
+                out_dir.as_ref().map(PathBuf::as_ref),
+                *clear_elm_stuff,
+                &config,
+            );
             if let Err(ref e) = suite_result {
                 println!("{}", e);
             }
@@ -489,7 +521,7 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
 
             let mut code = 0;
             for suite in suites.iter() {
-                let suite_result = run_suite(suite, None, &config);
+                let suite_result = run_suite(suite, None, *clear_elm_stuff, &config);
                 if let Err(ref e) = suite_result {
                     println!("{}", e);
                 }
