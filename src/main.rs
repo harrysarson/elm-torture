@@ -345,7 +345,7 @@ impl<'a> fmt::Display for SuiteError<'a> {
                 match &reason.reason {
                     lib::Error::Compiler(err) => write!(
                         f,
-                        "Failed to compile suite {}.\n{}",
+                        "Failed to compile suite {}.\n{}\n",
                         &reason.suite.display(),
                         indented::indented(display_compiler_error(
                             &err,
@@ -356,7 +356,7 @@ impl<'a> fmt::Display for SuiteError<'a> {
 
                     lib::Error::Runner(err) => write!(
                         f,
-                        "Suite {} failed at run time.\n{}",
+                        "Suite {} failed at run time.\n{}\n",
                         &reason.suite.display(),
                         indented::indented(display_runner_error(&err, reason.outdir.path()))
                     ),
