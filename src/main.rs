@@ -185,16 +185,14 @@ impl<'a> OutDir<'a> {
     }
 }
 
-struct CompilerError<'a> {
+fn display_compiler_error<'a>(
     err: &'a compile::Error,
     suite: &'a Path,
     out_dir: &'a OutDir<'a>,
-}
-
-impl<'a> fmt::Display for CompilerError<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+) -> impl fmt::Display + 'a {
+    lib::easy_format(move |f| {
         use compile::Error::*;
-        match self.err {
+        match err {
             CompilerNotFound(err) => write!(
                 f,
                 "Could not find elm compiler executable! Details:\n{}",
@@ -203,7 +201,7 @@ impl<'a> fmt::Display for CompilerError<'a> {
             ReadingTargets(err) => write!(
                 f,
                 "targets.txt found in suite {} but could not be read!. Details:\n{}",
-                self.suite.display(),
+                suite.display(),
                 err
             ),
             Process(err) => panic!("Failed to execute compiler! Details:\n{}", err),
@@ -215,44 +213,24 @@ impl<'a> fmt::Display for CompilerError<'a> {
             }
 
             OutDirIsNotDir => {
-                if self.out_dir.is_tempory() {
-                    panic!(
-                        "Invalid tempory directory: {}",
-                        self.out_dir.path().display()
-                    )
+                if out_dir.is_tempory() {
+                    panic!("Invalid tempory directory: {}", out_dir.path().display())
                 } else {
                     write!(
                         f,
                         "{} must either be a directory or a path where elm-torture can create one!",
-                        self.out_dir.path().display()
+                        out_dir.path().display()
                     )
                 }
             }
         }
-    }
+    })
 }
 
-fn display_compiler_error<'a>(
-    err: &'a compile::Error,
-    suite: &'a Path,
-    out_dir: &'a OutDir<'a>,
-) -> CompilerError<'a> {
-    CompilerError {
-        err,
-        suite,
-        out_dir,
-    }
-}
-
-struct RuntimeError<'a> {
-    err: &'a run::Error,
-    out_dir: &'a Path,
-}
-
-impl<'a> fmt::Display for RuntimeError<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+fn display_runner_error<'a>(err: &'a run::Error, out_dir: &'a Path) -> impl fmt::Display + 'a {
+    lib::easy_format(move |f| {
         use run::Error::*;
-        match self.err {
+        match err {
             NodeNotFound(err) => write!(
                 f,
                 "Could not find node executable to run generated Javascript. Details:\n{}",
@@ -276,7 +254,7 @@ impl<'a> fmt::Display for RuntimeError<'a> {
                 write!(
                     f,
                     "\n\nTo inspect the built files that caused this error see:\n  {}",
-                    self.out_dir.display()
+                    out_dir.display()
                 )
             }
             CannotFindExpectedOutput => write!(
@@ -294,11 +272,7 @@ impl<'a> fmt::Display for RuntimeError<'a> {
                 OutputPrinter(&output)
             ),
         }
-    }
-}
-
-fn display_runner_error<'a>(err: &'a run::Error, out_dir: &'a Path) -> RuntimeError<'a> {
-    RuntimeError { err, out_dir }
+    })
 }
 
 struct SuiteFailure<'a> {
@@ -504,11 +478,11 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
             println!();
             {
                 let len = suites.len();
-                println!(
+            println!(
                     "Running the following {} SSCCE{}:",
                     len,
                     if len == 1 { "" } else { "s" }
-                );
+            );
             };
             for path in suites.iter() {
                 println!("  {}", path.display());
