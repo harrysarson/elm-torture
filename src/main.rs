@@ -474,29 +474,58 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
         CliTask::RunSuites(suite_dir) => {
             let suites =
                 lib::find_suites::find_suites(&suite_dir).expect("error scanning for suites");
-            println!("{}", welcome_message);
-            println!();
-            {
-                let len = suites.len();
             println!(
-                    "Running the following {} SSCCE{}:",
-                    len,
-                    if len == 1 { "" } else { "s" }
-            );
-            };
-            for path in suites.iter() {
-                println!("  {}", path.display());
-            }
-            println!();
+                "{}
 
-            let mut code = 0;
-            for suite in suites.iter() {
-                let suite_result = run_suite(suite, None, *clear_elm_stuff, &config);
-                if let Err(ref e) = suite_result {
-                    println!("{}", e);
-                }
-                code |= get_exit_code(&suite_result);
-            }
+Running the following {} SSCCE{}:
+{}
+",
+                welcome_message,
+                suites.len(),
+                if suites.len() == 1 { "" } else { "s" },
+                indented::indented(lib::easy_format(|f| {
+                    for path in suites.iter() {
+                        writeln!(f, "{}", path.display())?
+                    }
+                    Ok(())
+                }))
+            );
+
+            let suite_results: Box<_> = suites
+                .iter()
+                .map(|suite| (suite, run_suite(suite, None, *clear_elm_stuff, &config)))
+                .inspect(|(_, suite_result)| {
+                    if let Err(ref e) = suite_result {
+                        println!("{}", e);
+                    }
+                })
+                .collect();
+
+            println!(
+                "
+            elm-torture has run the following {} SSCCE{}:
+{}
+",
+                suite_results.len(),
+                if suite_results.len() == 1 { "" } else { "s" },
+                indented::indented(lib::easy_format(|f| {
+                    for (path, result) in suite_results.iter() {
+                        writeln!(
+                            f,
+                            "{} ({})",
+                            path.display(),
+                            match result {
+                                Err(SuiteError::Failure { allowed: true, .. }) => "allowed failure",
+                                Err(SuiteError::ExpectedFailure) => "success when failure expected",
+                                Err(_) => "failure",
+                                Ok(()) => "success"
+                            }
+                        )?
+                    }
+                    Ok(())
+                }))
+            );
+            let code = suite_results.iter().fold(0, |a, b| a | get_exit_code(&b.1) );
             NonZeroI32::new(code)
         }
     }
