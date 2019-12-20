@@ -58,6 +58,7 @@ module.exports(Elm, expectedOutput);
     .map_err(Error::WritingHarness)?;
 
     let res = Command::new(node_exe)
+        .arg("--unhandled-rejections=strict")
         .arg(out_file)
         .output()
         .map_err(Error::NodeProcess)?;
@@ -68,6 +69,12 @@ module.exports(Elm, expectedOutput);
     if !res.stdout.is_empty() {
         return Err(Error::OutputProduced(res));
     }
+    let debug_stderr : &[u8] = b"Compiled in DEV mode. Follow the advice at https://elm-lang.org/0.19.1/optimize for better performance and smaller assets.\n";
+    if !res.stderr.is_empty() && &res.stderr[..] != debug_stderr {
+        return Err(Error::OutputProduced(res));
+    }
+
+    dbg!(res);
 
     Ok(())
 }
