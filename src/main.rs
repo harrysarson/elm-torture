@@ -456,18 +456,20 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
             None
         }
         CliTask::RunSuite { suite, out_dir } => {
-            println!("{}", welcome_message);
-            println!();
-            println!("Running SSCCE {}:", suite.display());
-            println!();
+            print!(
+                "{}
+
+Running SSCCE {}:",              welcome_message,
+                suite.display());
             let suite_result = run_suite(
                 suite,
                 out_dir.as_ref().map(PathBuf::as_ref),
                 *clear_elm_stuff,
                 &config,
             );
-            if let Err(ref e) = suite_result {
-                println!("{}", e);
+            match suite_result {
+                Ok(()) => println!(" Success"),
+                Err(ref e) => println!("\n\n{}", e),
             }
             NonZeroI32::new(get_exit_code(&suite_result))
         }
