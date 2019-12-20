@@ -74,7 +74,5 @@ module.exports(Elm, expectedOutput);
         return Err(Error::OutputProduced(res));
     }
 
-    dbg!(res);
-
     Ok(())
 }
