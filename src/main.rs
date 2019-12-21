@@ -18,6 +18,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 use std::process::Output;
+use colored::Colorize;
 
 enum CliTask {
     DumpConfig,
@@ -519,10 +520,10 @@ elm-torture has run the following {} SSCCE{}:
                             "{} ({})",
                             path.display(),
                             match result {
-                                Err(SuiteError::Failure { allowed: true, .. }) => "allowed failure",
-                                Err(SuiteError::ExpectedFailure) => "success when failure expected",
-                                Err(_) => "failure",
-                                Ok(()) => "success",
+                                Err(SuiteError::Failure { allowed: true, .. }) => "allowed failure".yellow(),
+                                Err(SuiteError::ExpectedFailure) => "success when failure expected".red(),
+                                Err(_) => "failure".red(),
+                                Ok(()) => "success".green(),
                             }
                         )?
                     }
