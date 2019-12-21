@@ -459,8 +459,10 @@ fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
             print!(
                 "{}
 
-Running SSCCE {}:",              welcome_message,
-                suite.display());
+Running SSCCE {}:",
+                welcome_message,
+                suite.display()
+            );
             let suite_result = run_suite(
                 suite,
                 out_dir.as_ref().map(PathBuf::as_ref),
@@ -505,7 +507,7 @@ Running the following {} SSCCE{}:
 
             println!(
                 "
-            elm-torture has run the following {} SSCCE{}:
+elm-torture has run the following {} SSCCE{}:
 {}
 ",
                 suite_results.len(),
@@ -520,14 +522,14 @@ Running the following {} SSCCE{}:
                                 Err(SuiteError::Failure { allowed: true, .. }) => "allowed failure",
                                 Err(SuiteError::ExpectedFailure) => "success when failure expected",
                                 Err(_) => "failure",
-                                Ok(()) => "success"
+                                Ok(()) => "success",
                             }
                         )?
                     }
                     Ok(())
                 }))
             );
-            let code = suite_results.iter().fold(0, |a, b| a | get_exit_code(&b.1) );
+            let code = suite_results.iter().fold(0, |a, b| a | get_exit_code(&b.1));
             NonZeroI32::new(code)
         }
     }
