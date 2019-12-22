@@ -441,6 +441,95 @@ fn get_exit_code(suite_result: &Result<(), SuiteError>) -> i32 {
     }
 }
 
+fn run_suites(
+    welcome_message: &str,
+    suites: &[PathBuf],
+    clear_elm_stuff: bool,
+    config: &Config,
+) -> Option<NonZeroI32> {
+    println!(
+        "{}
+
+Running the following {} SSCCE{}:
+{}
+",
+        welcome_message,
+        suites.len(),
+        if suites.len() == 1 { "" } else { "s" },
+        indented::indented(lib::easy_format(|f| {
+            for path in suites.iter() {
+                writeln!(f, "{}", path.display())?
+            }
+            Ok(())
+        }))
+    );
+
+    let suite_results: Box<_> = suites
+        .iter()
+        .map(|suite| (suite, run_suite(suite, None, clear_elm_stuff, config)))
+        .inspect(|(_, suite_result)| {
+            if let Err(ref e) = suite_result {
+                println!("{}", e);
+            }
+        })
+        .collect();
+
+    println!(
+        "
+elm-torture has run the following {} SSCCE{}:
+{}
+",
+        suite_results.len(),
+        if suite_results.len() == 1 { "" } else { "s" },
+        indented::indented(lib::easy_format(|f| {
+            for (path, result) in suite_results.iter() {
+                writeln!(
+                    f,
+                    "{} ({})",
+                    path.display(),
+                    match result {
+                        Err(SuiteError::Failure { allowed: true, .. }) =>
+                            "allowed failure".yellow(),
+                        Err(SuiteError::ExpectedFailure) => "success when failure expected".red(),
+                        Err(_) => "failure".red(),
+                        Ok(()) => "success".green(),
+                    }
+                )?
+            }
+            Ok(())
+        }))
+    );
+    let code = suite_results.iter().fold(0, |a, b| a | get_exit_code(&b.1));
+    NonZeroI32::new(code)
+}
+
+fn find_suite_error<'a>(
+    err: &'a lib::find_suites::Error,
+    suite_dir: &'a Path,
+) -> impl fmt::Display + 'a {
+    lib::easy_format(move |fmt| {
+        use lib::find_suites::Error::*;
+        match err {
+            ProvidedPathIsNotDir => write!(
+                fmt,
+                "elm-torture cannot run suites in {} as it is not a directory!
+    Please check the path and try again.
+    ",
+                suite_dir.display()
+            ),
+            ReadingDir(e) => Err(e).unwrap(),
+            ProvidedPathIsSuiteItself => write!(
+                fmt,
+                "elm-torture cannot run suites in {} as it is a suite itself!
+To run this suite individually try `--suite {}` (note `suite` rather than `--suites`).
+    ",
+                suite_dir.display(),
+                suite_dir.display(),
+            ),
+        }
+    })
+}
+
 fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
     let CliInstructions {
         config,
@@ -476,65 +565,13 @@ Running SSCCE {}:",
             }
             NonZeroI32::new(get_exit_code(&suite_result))
         }
-        CliTask::RunSuites(suite_dir) => {
-            let suites =
-                lib::find_suites::find_suites(&suite_dir).expect("error scanning for suites");
-            println!(
-                "{}
-
-Running the following {} SSCCE{}:
-{}
-",
-                welcome_message,
-                suites.len(),
-                if suites.len() == 1 { "" } else { "s" },
-                indented::indented(lib::easy_format(|f| {
-                    for path in suites.iter() {
-                        writeln!(f, "{}", path.display())?
-                    }
-                    Ok(())
-                }))
-            );
-
-            let suite_results: Box<_> = suites
-                .iter()
-                .map(|suite| (suite, run_suite(suite, None, *clear_elm_stuff, &config)))
-                .inspect(|(_, suite_result)| {
-                    if let Err(ref e) = suite_result {
-                        println!("{}", e);
-                    }
-                })
-                .collect();
-
-            println!(
-                "
-elm-torture has run the following {} SSCCE{}:
-{}
-",
-                suite_results.len(),
-                if suite_results.len() == 1 { "" } else { "s" },
-                indented::indented(lib::easy_format(|f| {
-                    for (path, result) in suite_results.iter() {
-                        writeln!(
-                            f,
-                            "{} ({})",
-                            path.display(),
-                            match result {
-                                Err(SuiteError::Failure { allowed: true, .. }) =>
-                                    "allowed failure".yellow(),
-                                Err(SuiteError::ExpectedFailure) =>
-                                    "success when failure expected".red(),
-                                Err(_) => "failure".red(),
-                                Ok(()) => "success".green(),
-                            }
-                        )?
-                    }
-                    Ok(())
-                }))
-            );
-            let code = suite_results.iter().fold(0, |a, b| a | get_exit_code(&b.1));
-            NonZeroI32::new(code)
-        }
+        CliTask::RunSuites(suite_dir) => match lib::find_suites::find_suites(&suite_dir) {
+            Ok(suites) => run_suites(welcome_message, &suites, *clear_elm_stuff, config),
+            Err(ref err) => {
+                eprint!("{}", find_suite_error(err, suite_dir));
+                NonZeroI32::new(0x28)
+            }
+        },
     }
 }
 
