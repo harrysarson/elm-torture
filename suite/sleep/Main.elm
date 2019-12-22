@@ -1,8 +1,5 @@
 module Main exposing (main)
 
-{-| This is not how Cmd.map is designed to be used.
-However, it should test some of the knarly bits of elm/core:Platform
--}
 
 import Platform
 import Process
