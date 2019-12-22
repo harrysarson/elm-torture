@@ -4,6 +4,7 @@ mod lib;
 
 use clap::App;
 use clap::Arg;
+use colored::Colorize;
 use lib::compile;
 use lib::config;
 use lib::config::Config;
@@ -18,7 +19,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 use std::process::Output;
-use colored::Colorize;
 
 enum CliTask {
     DumpConfig,
@@ -520,8 +520,10 @@ elm-torture has run the following {} SSCCE{}:
                             "{} ({})",
                             path.display(),
                             match result {
-                                Err(SuiteError::Failure { allowed: true, .. }) => "allowed failure".yellow(),
-                                Err(SuiteError::ExpectedFailure) => "success when failure expected".red(),
+                                Err(SuiteError::Failure { allowed: true, .. }) =>
+                                    "allowed failure".yellow(),
+                                Err(SuiteError::ExpectedFailure) =>
+                                    "success when failure expected".red(),
                                 Err(_) => "failure".red(),
                                 Ok(()) => "success".green(),
                             }

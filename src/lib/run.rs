@@ -69,8 +69,16 @@ module.exports(Elm, expectedOutput);
     if !res.stdout.is_empty() {
         return Err(Error::OutputProduced(res));
     }
-    let debug_stderr : &[u8] = b"Compiled in DEV mode. Follow the advice at https://elm-lang.org/0.19.1/optimize for better performance and smaller assets.\n";
-    if !res.stderr.is_empty() && &res.stderr[..] != debug_stderr {
+    let possible_stderr = |mode| {
+        format!(
+            "Compiled in {} mode. Follow the advice at https://elm-lang.org/0.19.1/optimize for better performance and smaller assets.\n",
+            mode
+        ).into_bytes()
+    };
+    if !res.stderr.is_empty()
+        && res.stderr[..] != *possible_stderr("DEV")
+        && res.stderr[..] != *possible_stderr("DEBUG")
+    {
         return Err(Error::OutputProduced(res));
     }
 
