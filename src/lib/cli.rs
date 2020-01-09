@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::path::Path;
 use crate::lib::config::Config;
 
-pub enum CliTask {
+pub enum Task {
     DumpConfig,
     RunSuite {
         suite: PathBuf,
@@ -15,13 +15,13 @@ pub enum CliTask {
     RunSuites(PathBuf),
 }
 
-pub struct CliInstructions {
+pub struct Instructions {
     pub config: config::Config,
     pub clear_elm_stuff: bool,
-    pub task: CliTask,
+    pub task: Task,
 }
 
-pub  fn get_cli_task() -> CliInstructions {
+pub  fn get_cli_task() -> Instructions {
     let matches = App::new("Elm Torture")
         .version("0.0.1")
         .author("Harry Sarson <harry.sarson@hotmail.co.uk>")
@@ -90,19 +90,19 @@ pub  fn get_cli_task() -> CliInstructions {
         deserialised
     };
 
-    CliInstructions {
+    Instructions {
         config,
         clear_elm_stuff,
         task: if matches.is_present("show_config") {
-            CliTask::DumpConfig
+            Task::DumpConfig
         } else if let Some(suites) = matches.value_of("suites") {
-            CliTask::RunSuites(
+            Task::RunSuites(
                 suites
                     .parse()
                     .unwrap_or_else(|infalible| match infalible {}),
             )
         } else {
-            CliTask::RunSuite {
+            Task::RunSuite {
                 suite: matches
                     .value_of("suite")
                     .unwrap()

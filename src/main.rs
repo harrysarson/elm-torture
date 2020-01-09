@@ -4,8 +4,6 @@ mod lib;
 
 use colored::Colorize;
 use lib::cli;
-use lib::cli::CliInstructions;
-use lib::cli::CliTask;
 use lib::compile;
 use lib::config::Config;
 use lib::run;
@@ -419,22 +417,22 @@ To run this suite individually try `--suite {}` (note `suite` rather than `--sui
     })
 }
 
-fn run_app(instructions: &CliInstructions) -> Option<NonZeroI32> {
-    let CliInstructions {
+fn run_app(instructions: &cli::Instructions) -> Option<NonZeroI32> {
+    let cli::Instructions {
         config,
         clear_elm_stuff,
         task,
     } = instructions;
     let welcome_message = "Elm Torture - stress tests for an elm compiler";
     match task {
-        CliTask::DumpConfig => {
+        cli::Task::DumpConfig => {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&config).expect("could not serialize config")
             );
             None
         }
-        CliTask::RunSuite { suite, out_dir } => {
+        cli::Task::RunSuite { suite, out_dir } => {
             print!(
                 "{}
 
@@ -454,7 +452,7 @@ Running SSCCE {}:",
             }
             NonZeroI32::new(get_exit_code(&suite_result))
         }
-        CliTask::RunSuites(suite_dir) => match lib::find_suites::find_suites(&suite_dir) {
+        cli::Task::RunSuites(suite_dir) => match lib::find_suites::find_suites(&suite_dir) {
             Ok(suites) => run_suites(welcome_message, &suites, *clear_elm_stuff, config),
             Err(ref err) => {
                 eprint!("{}", find_suite_error(err, suite_dir));
