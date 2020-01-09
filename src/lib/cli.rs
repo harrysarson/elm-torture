@@ -18,6 +18,7 @@ pub enum Task {
 pub struct Instructions {
     pub config: config::Config,
     pub clear_elm_stuff: bool,
+    pub fail_fast: bool,
     pub task: Task,
 }
 
@@ -66,9 +67,15 @@ pub  fn get_cli_task() -> Instructions {
                 .long("clear-elm-stuff")
                 .help("Delete the elm-stuff directory before running suite"),
         )
+        .arg(
+            Arg::with_name("fail_fast")
+                .long("fail-fast")
+                .help("Stop running on the first failed suite."),
+        )
         .get_matches();
 
     let clear_elm_stuff = matches.is_present("clear_elm_stuff");
+    let fail_fast = matches.is_present("fail_fast");
 
     let config = {
         let config_file = matches.value_of_os("config");
@@ -93,6 +100,7 @@ pub  fn get_cli_task() -> Instructions {
     Instructions {
         config,
         clear_elm_stuff,
+        fail_fast,
         task: if matches.is_present("show_config") {
             Task::DumpConfig
         } else if let Some(suites) = matches.value_of("suites") {

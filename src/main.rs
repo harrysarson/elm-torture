@@ -5,7 +5,6 @@ mod lib;
 use colored::Colorize;
 use lib::cli;
 use lib::compile;
-use lib::config::Config;
 use lib::run;
 use std::fmt;
 use std::fs;
@@ -238,8 +237,7 @@ impl<'a> fmt::Display for SuiteError<'a> {
 fn run_suite<'a>(
     suite: &'a Path,
     provided_out_dir: Option<&'a Path>,
-    clear_elm_stuff: bool,
-    config: &Config,
+    instructions: &cli::Instructions,
 ) -> Result<(), SuiteError<'a>> {
     if !suite.exists() {
         return Err(SuiteError::SuiteNotExist(suite));
@@ -250,7 +248,7 @@ fn run_suite<'a>(
     if !suite.join("elm.json").exists() {
         return Err(SuiteError::SuiteNotElm(suite));
     }
-    let failure_allowed = config.allowed_failures.iter().any(|p| {
+    let failure_allowed = instructions.config.allowed_failures.iter().any(|p| {
         if p.exists() {
             same_file::is_same_file(suite, p).unwrap_or_else(|e| {
                 panic!(
@@ -262,7 +260,7 @@ fn run_suite<'a>(
             false
         }
     });
-    if clear_elm_stuff {
+    if instructions.clear_elm_stuff {
         fs::remove_dir_all(suite.join("elm-stuff"))
             .or_else(|e| {
                 if e.kind() == io::ErrorKind::NotFound {
@@ -284,7 +282,7 @@ fn run_suite<'a>(
         OutDir::Tempory(dir)
     };
 
-    let run_result = lib::run_suite(&suite, out_dir.path(), &config);
+    let run_result = lib::run_suite(&suite, out_dir.path(), &instructions.config);
 
     if let Err(lib::Error::Runner(run::Error::Runtime(_))) = run_result {
         out_dir.persist()
@@ -331,9 +329,11 @@ fn get_exit_code(suite_result: &Result<(), SuiteError>) -> i32 {
 fn run_suites(
     welcome_message: &str,
     suites: &[PathBuf],
-    clear_elm_stuff: bool,
-    config: &Config,
+    instructions: &cli::Instructions,
 ) -> Option<NonZeroI32> {
+
+    assert!(!suites.is_empty());
+
     println!(
         "{}
 
@@ -351,15 +351,24 @@ Running the following {} SSCCE{}:
         }))
     );
 
-    let suite_results: Box<_> = suites
-        .iter()
-        .map(|suite| (suite, run_suite(suite, None, clear_elm_stuff, config)))
-        .inspect(|(_, suite_result)| {
-            if let Err(ref e) = suite_result {
+    let suite_results = {
+        let mut tmp = Vec::with_capacity(suites.len());
+        for suite in suites {
+            let res = run_suite(suite, None, instructions);
+            if let Err(ref e) = res {
                 println!("{}", e);
             }
-        })
-        .collect();
+            let failed = match res {
+                Err(SuiteError::Failure { allowed: true, .. }) | Ok(()) => false,
+                Err(_)  => true,
+            };
+            tmp.push((suite, res));
+            if instructions.fail_fast && failed {
+                break;
+            }
+        }
+        tmp
+    };
 
     println!(
         "
@@ -369,7 +378,7 @@ elm-torture has run the following {} SSCCE{}:
         suite_results.len(),
         if suite_results.len() == 1 { "" } else { "s" },
         indented::indented(lib::easy_format(|f| {
-            for (path, result) in suite_results.iter() {
+            for (path, result) in &suite_results {
                 writeln!(
                     f,
                     "{} ({})",
@@ -418,21 +427,20 @@ To run this suite individually try `--suite {}` (note `suite` rather than `--sui
 }
 
 fn run_app(instructions: &cli::Instructions) -> Option<NonZeroI32> {
-    let cli::Instructions {
-        config,
-        clear_elm_stuff,
-        task,
-    } = instructions;
     let welcome_message = "Elm Torture - stress tests for an elm compiler";
-    match task {
+    match instructions.task {
         cli::Task::DumpConfig => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&config).expect("could not serialize config")
+                serde_json::to_string_pretty(&instructions.config)
+                    .expect("could not serialize config")
             );
             None
         }
-        cli::Task::RunSuite { suite, out_dir } => {
+        cli::Task::RunSuite {
+            ref suite,
+            ref out_dir,
+        } => {
             print!(
                 "{}
 
@@ -440,20 +448,16 @@ Running SSCCE {}:",
                 welcome_message,
                 suite.display()
             );
-            let suite_result = run_suite(
-                suite,
-                out_dir.as_ref().map(PathBuf::as_ref),
-                *clear_elm_stuff,
-                &config,
-            );
+            let suite_result =
+                run_suite(suite, out_dir.as_ref().map(PathBuf::as_ref), &instructions);
             match suite_result {
                 Ok(()) => println!(" Success"),
                 Err(ref e) => println!("\n\n{}", e),
             }
             NonZeroI32::new(get_exit_code(&suite_result))
         }
-        cli::Task::RunSuites(suite_dir) => match lib::find_suites::find_suites(&suite_dir) {
-            Ok(suites) => run_suites(welcome_message, &suites, *clear_elm_stuff, config),
+        cli::Task::RunSuites(ref suite_dir) => match lib::find_suites::find_suites(&suite_dir) {
+            Ok(suites) => run_suites(welcome_message, &suites, &instructions),
             Err(ref err) => {
                 eprint!("{}", find_suite_error(err, suite_dir));
                 NonZeroI32::new(0x28)
