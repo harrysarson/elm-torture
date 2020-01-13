@@ -331,7 +331,6 @@ fn run_suites(
     suites: &[PathBuf],
     instructions: &cli::Instructions,
 ) -> Option<NonZeroI32> {
-
     assert!(!suites.is_empty());
 
     println!(
@@ -360,7 +359,7 @@ Running the following {} SSCCE{}:
             }
             let failed = match res {
                 Err(SuiteError::Failure { allowed: true, .. }) | Ok(()) => false,
-                Err(_)  => true,
+                Err(_) => true,
             };
             tmp.push((suite, res));
             if instructions.fail_fast && failed {

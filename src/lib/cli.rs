@@ -1,10 +1,10 @@
+use crate::lib::config;
+use crate::lib::config::Config;
 use clap::App;
 use clap::Arg;
-use crate::lib::config;
 use std::fs::File;
-use std::path::PathBuf;
 use std::path::Path;
-use crate::lib::config::Config;
+use std::path::PathBuf;
 
 pub enum Task {
     DumpConfig,
@@ -22,7 +22,7 @@ pub struct Instructions {
     pub task: Task,
 }
 
-pub  fn get_cli_task() -> Instructions {
+pub fn get_cli_task() -> Instructions {
     let matches = App::new("Elm Torture")
         .version("0.0.1")
         .author("Harry Sarson <harry.sarson@hotmail.co.uk>")
