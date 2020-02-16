@@ -14,15 +14,11 @@ use std::num::NonZeroI32;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
-use std::process::Output;
 
-struct OutputPrinter<'a>(&'a Output);
-
-impl<'a> fmt::Display for OutputPrinter<'a> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        let OutputPrinter(output) = self;
+fn display_process_output<'a>(output: &'a process::Output) -> impl fmt::Display + 'a {
+    lib::easy_format(move |f| {
         write!(
-            fmt,
+            f,
             r#"
  = Exit code: {} =
  = Std Out =
@@ -33,7 +29,7 @@ impl<'a> fmt::Display for OutputPrinter<'a> {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         )
-    }
+    })
 }
 
 #[derive(Debug)]
@@ -92,9 +88,11 @@ fn display_compiler_error<'a>(
                 err
             ),
             Process(err) => panic!("Failed to execute compiler! Details:\n{}", err),
-            Compiler(output) | CompilerStdErrNotEmpty(output) => {
-                write!(f, "Compilation failed!\n{}", OutputPrinter(&output))
-            }
+            Compiler(output) | CompilerStdErrNotEmpty(output) => write!(
+                f,
+                "Compilation failed!\n{}",
+                display_process_output(&output)
+            ),
             SuiteDoesNotExist => {
                 panic!("Path was not suite - this should have been checked already!")
             }
@@ -137,7 +135,7 @@ fn display_runner_error<'a>(err: &'a run::Error, out_dir: &'a Path) -> impl fmt:
                 err
             ),
             Runtime(output) => {
-                write!(f, "{}", OutputPrinter(&output))?;
+                write!(f, "{}", display_process_output(&output))?;
                 write!(
                     f,
                     "\n\nTo inspect the built files that caused this error see:\n  {}",
@@ -156,7 +154,7 @@ fn display_runner_error<'a>(err: &'a run::Error, out_dir: &'a Path) -> impl fmt:
             OutputProduced(output) => write!(
                 f,
                 "The suite ran without error but produced the following output!:\n{}",
-                OutputPrinter(&output)
+                display_process_output(&output)
             ),
         }
     })
