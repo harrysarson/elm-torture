@@ -1,4 +1,4 @@
-use crate::lib::config::Config;
+use super::config::Config;
 use std::fs;
 use std::fs::File;
 use std::io;
