@@ -48,12 +48,6 @@ impl<'a> OutDir<'a> {
         }
     }
 }
-#[derive(Debug)]
-pub struct SuiteFailure<'a> {
-    pub suite: &'a Path,
-    pub outdir: OutDir<'a>,
-    pub reason: Error,
-}
 
 #[derive(Debug)]
 pub enum SuiteError<'a> {
@@ -62,7 +56,9 @@ pub enum SuiteError<'a> {
     SuiteNotElm(&'a Path),
     Failure {
         allowed: bool,
-        reason: SuiteFailure<'a>,
+        suite: &'a Path,
+        outdir: OutDir<'a>,
+        reason: Error,
     },
     ExpectedFailure,
 }
@@ -131,11 +127,9 @@ pub fn compile_and_run_suite<'a>(
     } else {
         run_result.map_err(|err| SuiteError::Failure {
             allowed: failure_allowed,
-            reason: SuiteFailure {
-                outdir: out_dir,
-                suite,
-                reason: err,
-            },
+            outdir: out_dir,
+            suite,
+            reason: err,
         })
     }
 }

@@ -149,20 +149,25 @@ impl<'a> fmt::Display for SuiteError<'a> {
                 suite.display()
             ),
 
-            Failure { allowed, reason } => {
-                match &reason.reason {
+            Failure {
+                allowed,
+                suite,
+                outdir,
+                reason,
+            } => {
+                match &reason {
                     compile_and_run::Error::Compiler(err) => write!(
                         f,
                         "Failed to compile suite {}.\n{}\n",
-                        &reason.suite.display(),
-                        indented::indented(compiler_error(&err, &reason.suite, &reason.outdir))
+                        &suite.display(),
+                        indented::indented(compiler_error(&err, &suite, &outdir))
                     ),
 
                     compile_and_run::Error::Runner(err) => write!(
                         f,
                         "Suite {} failed at run time.\n{}\n",
-                        &reason.suite.display(),
-                        indented::indented(runner_error(&err, reason.outdir.path()))
+                        &suite.display(),
+                        indented::indented(runner_error(&err, outdir.path()))
                     ),
                 }?;
                 if *allowed {

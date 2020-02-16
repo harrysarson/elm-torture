@@ -19,11 +19,13 @@ fn get_exit_code(suite_result: &Result<(), SuiteError>) -> i32 {
         Err(ref suite_error) => match suite_error {
             SuiteNotExist(_) | SuiteNotDir(_) | SuiteNotElm(_) => 0x28,
 
-            Failure { reason, allowed } => {
+            Failure {
+                reason, allowed, ..
+            } => {
                 if *allowed {
                     0
                 } else {
-                    match reason.reason {
+                    match reason {
                         compile_and_run::Error::Compiler(_) => 0x21,
                         compile_and_run::Error::Runner(_) => 0x22,
                     }
