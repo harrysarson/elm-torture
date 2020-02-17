@@ -1,8 +1,6 @@
-use super::compile;
-use super::compile_and_run;
-use super::compile_and_run::SuiteError;
 use super::find_suites;
 use super::run;
+use super::run::SuiteError;
 use std::fmt;
 use std::path::Path;
 use std::process;
@@ -37,12 +35,12 @@ fn process_output<'a>(output: &'a process::Output) -> impl fmt::Display + 'a {
 }
 
 fn compiler_error<'a, P1: AsRef<Path> + 'a, P2: AsRef<Path> + 'a>(
-    err: &'a compile::Error,
+    err: &'a run::CompileError,
     suite: P1,
-    out_dir: &'a compile_and_run::OutDir<P2>,
+    out_dir: &'a run::OutDir<P2>,
 ) -> impl fmt::Display + 'a {
     easy_format(move |f| {
-        use compile::Error::*;
+        use run::CompileError::*;
         match err {
             CompilerNotFound(err) => write!(
                 f,
@@ -78,9 +76,9 @@ fn compiler_error<'a, P1: AsRef<Path> + 'a, P2: AsRef<Path> + 'a>(
     })
 }
 
-fn runner_error<'a>(err: &'a run::Error, out_dir: &'a Path) -> impl fmt::Display + 'a {
+fn run_error<'a>(err: &'a run::RunError, out_dir: &'a Path) -> impl fmt::Display + 'a {
     easy_format(move |f| {
-        use run::Error::*;
+        use run::RunError::*;
         match err {
             NodeNotFound(err) => write!(
                 f,
@@ -158,18 +156,18 @@ pub fn suite_error<'a, Pe: AsRef<Path>, Ps: AsRef<Path> + 'a>(
                 reason,
             } => {
                 match &reason {
-                    compile_and_run::Error::Compiler(err) => write!(
+                    run::CompileAndRunError::Compiler(err) => write!(
                         f,
                         "Failed to compile suite {}.\n{}\n",
                         &suite.as_ref().display(),
                         indented::indented(compiler_error(&err, &suite, outdir))
                     ),
 
-                    compile_and_run::Error::Runner(err) => write!(
+                    run::CompileAndRunError::Runner(err) => write!(
                         f,
                         "Suite {} failed at run time.\n{}\n",
                         &suite.as_ref().display(),
-                        indented::indented(runner_error(&err, outdir.path()))
+                        indented::indented(run_error(&err, outdir.path()))
                     ),
                 }?;
                 if *allowed {

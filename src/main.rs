@@ -4,11 +4,11 @@ mod lib;
 
 use colored::Colorize;
 use lib::cli;
-use lib::compile_and_run;
-use lib::compile_and_run::compile_and_run_suite;
-use lib::compile_and_run::compile_and_run_suites;
-use lib::compile_and_run::SuiteError;
 use lib::formatting;
+use lib::run;
+use lib::run::compile_and_run_suite;
+use lib::run::compile_and_run_suites;
+use lib::run::SuiteError;
 use std::num::NonZeroI32;
 use std::process;
 
@@ -26,8 +26,8 @@ fn get_exit_code<P>(suite_result: &Result<(), SuiteError<P>>) -> i32 {
                     0
                 } else {
                     match reason {
-                        compile_and_run::Error::Compiler(_) => 0x21,
-                        compile_and_run::Error::Runner(_) => 0x22,
+                        run::CompileAndRunError::Compiler(_) => 0x21,
+                        run::CompileAndRunError::Runner(_) => 0x22,
                     }
                 }
             }
