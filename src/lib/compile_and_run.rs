@@ -2,7 +2,6 @@ use super::config::Config;
 use super::formatting;
 use std::fs;
 use std::io;
-use std::mem;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -19,8 +18,11 @@ pub enum OutDir<P> {
     Persistent(PathBuf),
 }
 
-impl<P: AsRef<Path>> OutDir<P> {
-    pub fn path(&self) -> &Path {
+impl<P> OutDir<P> {
+    pub fn path(&self) -> &Path
+    where
+        P: AsRef<Path>,
+    {
         match self {
             Self::Provided(p) => p.as_ref(),
             Self::Tempory(ref p) => p.path(),
@@ -36,15 +38,17 @@ impl<P: AsRef<Path>> OutDir<P> {
     }
 
     pub fn persist(&mut self) {
-        // A juggle to drop the tempdir contained behind a mutable reference.
-        if let OutDir::Tempory(_) = self {
-            let dir = mem::replace(self, OutDir::Persistent(PathBuf::new()));
-            if let OutDir::Tempory(tempdir) = dir {
-                mem::replace(self, OutDir::Persistent(tempdir.into_path()));
-            } else {
-                panic!("Impossible state!");
-            }
-        }
+        replace_with::replace_with(
+            self,
+            || OutDir::Persistent(PathBuf::new()),
+            |od| {
+                if let OutDir::Tempory(tempdir) = od {
+                    OutDir::Persistent(tempdir.into_path())
+                } else {
+                    od
+                }
+            },
+        )
     }
 }
 
@@ -137,7 +141,7 @@ pub fn compile_and_run_suite<Ps: AsRef<Path>, Pe: AsRef<Path>>(
 pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
     suites: impl Iterator<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
-) -> impl Iterator<Item = (Ps, Result<(), SuiteError<PathBuf>>)> + 'a {
+) -> impl Iterator<Item = (Ps, Result<(), SuiteError<&Path>>)> + 'a {
     suites
         .map(move |suite: Ps| {
             let res = compile_and_run_suite(&suite, None, instructions);
