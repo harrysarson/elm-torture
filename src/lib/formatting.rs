@@ -36,10 +36,10 @@ fn process_output<'a>(output: &'a process::Output) -> impl fmt::Display + 'a {
     })
 }
 
-fn compiler_error<'a>(
+fn compiler_error<'a, P1: AsRef<Path> + 'a, P2: AsRef<Path> + 'a>(
     err: &'a compile::Error,
-    suite: &'a Path,
-    out_dir: &'a compile_and_run::OutDir<'a>,
+    suite: P1,
+    out_dir: &'a compile_and_run::OutDir<P2>,
 ) -> impl fmt::Display + 'a {
     easy_format(move |f| {
         use compile::Error::*;
@@ -52,7 +52,7 @@ fn compiler_error<'a>(
             ReadingTargets(err) => write!(
                 f,
                 "targets.txt found in suite {} but could not be read!. Details:\n{}",
-                suite.display(),
+                suite.as_ref().display(),
                 err
             ),
             Process(err) => panic!("Failed to execute compiler! Details:\n{}", err),
@@ -126,32 +126,34 @@ fn runner_error<'a>(err: &'a run::Error, out_dir: &'a Path) -> impl fmt::Display
     })
 }
 
-impl<'a> fmt::Display for SuiteError<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+pub fn suite_error<'a, Pe: AsRef<Path>, Ps: AsRef<Path> + 'a>(
+    err: &'a SuiteError<Pe>,
+    suite: Ps,
+) -> impl fmt::Display + 'a {
+    easy_format(move |f| {
         use SuiteError::*;
 
-        match self {
-            SuiteNotExist(suite) => write!(
+        match err {
+            SuiteNotExist => write!(
                 f,
                 "The provided path to a suite: \"{}\"  does not exist",
-                suite.display()
+                suite.as_ref().display()
             ),
 
-            SuiteNotDir(suite) => write!(
+            SuiteNotDir => write!(
                 f,
                 "The provided path to a suite: \"{}\" exists but is not a directory",
-                suite.display()
+                suite.as_ref().display()
             ),
 
-            SuiteNotElm(suite) => write!(
+            SuiteNotElm => write!(
                 f,
                 "The suite directory: \"{}\" is not an Elm application or package",
-                suite.display()
+                suite.as_ref().display()
             ),
 
             Failure {
                 allowed,
-                suite,
                 outdir,
                 reason,
             } => {
@@ -159,14 +161,14 @@ impl<'a> fmt::Display for SuiteError<'a> {
                     compile_and_run::Error::Compiler(err) => write!(
                         f,
                         "Failed to compile suite {}.\n{}\n",
-                        &suite.display(),
-                        indented::indented(compiler_error(&err, &suite, &outdir))
+                        &suite.as_ref().display(),
+                        indented::indented(compiler_error(&err, &suite, outdir))
                     ),
 
                     compile_and_run::Error::Runner(err) => write!(
                         f,
                         "Suite {} failed at run time.\n{}\n",
-                        &suite.display(),
+                        &suite.as_ref().display(),
                         indented::indented(runner_error(&err, outdir.path()))
                     ),
                 }?;
@@ -177,9 +179,13 @@ impl<'a> fmt::Display for SuiteError<'a> {
                 }
             }
 
-            ExpectedFailure => write!(f, "Suite was expected to fail but did not!"),
+            ExpectedFailure => write!(
+                f,
+                "Suite {} was expected to fail but did not!",
+                &suite.as_ref().display(),
+            ),
         }
-    }
+    })
 }
 
 pub fn find_suite_error<'a>(

@@ -1,6 +1,5 @@
 use super::config::Config;
-use crate::formatting;
-use colored::Colorize;
+use super::formatting;
 use std::fs;
 use std::io;
 use std::mem;
@@ -14,16 +13,16 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-pub enum OutDir<'a> {
-    Provided(&'a Path),
+pub enum OutDir<P> {
+    Provided(P),
     Tempory(tempfile::TempDir),
     Persistent(PathBuf),
 }
 
-impl<'a> OutDir<'a> {
+impl<P: AsRef<Path>> OutDir<P> {
     pub fn path(&self) -> &Path {
         match self {
-            Self::Provided(p) => p,
+            Self::Provided(p) => p.as_ref(),
             Self::Tempory(ref p) => p.path(),
             Self::Persistent(ref p) => p,
         }
@@ -50,44 +49,46 @@ impl<'a> OutDir<'a> {
 }
 
 #[derive(Debug)]
-pub enum SuiteError<'a> {
-    SuiteNotExist(&'a Path),
-    SuiteNotDir(&'a Path),
-    SuiteNotElm(&'a Path),
+pub enum SuiteError<P> {
+    SuiteNotExist,
+    SuiteNotDir,
+    SuiteNotElm,
     Failure {
         allowed: bool,
-        suite: &'a Path,
-        outdir: OutDir<'a>,
+        outdir: OutDir<P>,
         reason: Error,
     },
     ExpectedFailure,
 }
+
 pub fn compile_and_run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Error> {
     super::compile::compile(&suite, &out_dir, &config).map_err(Error::Compiler)?;
     super::run::run(&suite, &out_dir, &config).map_err(Error::Runner)?;
     Ok(())
 }
 
-pub fn compile_and_run_suite<'a>(
-    suite: &'a Path,
-    provided_out_dir: Option<&'a Path>,
+pub fn compile_and_run_suite<Ps: AsRef<Path>, Pe: AsRef<Path>>(
+    suite: Ps,
+    provided_out_dir: Option<Pe>,
     instructions: &super::cli::Instructions,
-) -> Result<(), SuiteError<'a>> {
-    if !suite.exists() {
-        return Err(SuiteError::SuiteNotExist(suite));
+) -> Result<(), SuiteError<Pe>> {
+    if !suite.as_ref().exists() {
+        return Err(SuiteError::SuiteNotExist);
     }
-    if !suite.is_dir() {
-        return Err(SuiteError::SuiteNotDir(suite));
+    if !suite.as_ref().is_dir() {
+        return Err(SuiteError::SuiteNotDir);
     }
-    if !suite.join("elm.json").exists() {
-        return Err(SuiteError::SuiteNotElm(suite));
+    if !suite.as_ref().join("elm.json").exists() {
+        return Err(SuiteError::SuiteNotElm);
     }
     let failure_allowed = instructions.config.allowed_failures.iter().any(|p| {
         if p.exists() {
-            same_file::is_same_file(suite, p).unwrap_or_else(|e| {
+            same_file::is_same_file(&suite, p).unwrap_or_else(|e| {
                 panic!(
                     "Error when comparing the paths {:?} and {:?}: {:?}",
-                    suite, p, e
+                    suite.as_ref(),
+                    p,
+                    e
                 )
             })
         } else {
@@ -95,7 +96,7 @@ pub fn compile_and_run_suite<'a>(
         }
     });
     if instructions.clear_elm_stuff {
-        fs::remove_dir_all(suite.join("elm-stuff"))
+        fs::remove_dir_all(suite.as_ref().join("elm-stuff"))
             .or_else(|e| {
                 if e.kind() == io::ErrorKind::NotFound {
                     Ok(())
@@ -116,7 +117,7 @@ pub fn compile_and_run_suite<'a>(
         OutDir::Tempory(dir)
     };
 
-    let run_result = compile_and_run(&suite, out_dir.path(), &instructions.config);
+    let run_result = compile_and_run(&suite.as_ref(), out_dir.path(), &instructions.config);
 
     if let Err(Error::Runner(super::run::Error::Runtime(_))) = run_result {
         out_dir.persist()
@@ -128,79 +129,27 @@ pub fn compile_and_run_suite<'a>(
         run_result.map_err(|err| SuiteError::Failure {
             allowed: failure_allowed,
             outdir: out_dir,
-            suite,
             reason: err,
         })
     }
 }
 
-pub fn compile_and_run_suites<'a>(
-    welcome_message: &str,
-    suites: &'a [PathBuf],
-    instructions: &super::cli::Instructions,
-) -> Vec<(&'a PathBuf, Result<(), SuiteError<'a>>)> {
-    assert!(!suites.is_empty());
-
-    println!(
-        "{}
-
-Running the following {} SSCCE{}:
-{}
-",
-        welcome_message,
-        suites.len(),
-        if suites.len() == 1 { "" } else { "s" },
-        indented::indented(formatting::easy_format(|f| {
-            for path in suites.iter() {
-                writeln!(f, "{}", path.display())?
-            }
-            Ok(())
-        }))
-    );
-
-    let suite_results = {
-        let mut tmp = Vec::with_capacity(suites.len());
-        for suite in suites {
-            let res = compile_and_run_suite(suite, None, instructions);
+pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
+    suites: impl Iterator<Item = Ps> + 'a,
+    instructions: &'a super::cli::Instructions,
+) -> impl Iterator<Item = (Ps, Result<(), SuiteError<PathBuf>>)> + 'a {
+    suites
+        .map(move |suite: Ps| {
+            let res = compile_and_run_suite(&suite, None, instructions);
             if let Err(ref e) = res {
-                println!("{}", e);
+                println!("{}", formatting::suite_error(e, &suite));
             }
             let failed = match res {
-                Err(SuiteError::Failure { allowed: true, .. }) | Ok(()) => false,
+                Err(SuiteError::Failure { allowed: true, .. }) | Ok(_) => false,
                 Err(_) => true,
             };
-            tmp.push((suite, res));
-            if instructions.fail_fast && failed {
-                break;
-            }
-        }
-        tmp
-    };
-
-    println!(
-        "
-elm-torture has run the following {} SSCCE{}:
-{}
-",
-        suite_results.len(),
-        if suite_results.len() == 1 { "" } else { "s" },
-        indented::indented(formatting::easy_format(|f| {
-            for (path, result) in &suite_results {
-                writeln!(
-                    f,
-                    "{} ({})",
-                    path.display(),
-                    match result {
-                        Err(SuiteError::Failure { allowed: true, .. }) =>
-                            "allowed failure".yellow(),
-                        Err(SuiteError::ExpectedFailure) => "success when failure expected".red(),
-                        Err(_) => "failure".red(),
-                        Ok(()) => "success".green(),
-                    }
-                )?
-            }
-            Ok(())
-        }))
-    );
-    suite_results
+            ((suite, res), failed)
+        })
+        .take_while(move |(_, failed)| !(instructions.fail_fast && *failed))
+        .map(|(tup, _)| tup)
 }

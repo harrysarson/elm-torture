@@ -2,6 +2,7 @@
 
 mod lib;
 
+use colored::Colorize;
 use lib::cli;
 use lib::compile_and_run;
 use lib::compile_and_run::compile_and_run_suite;
@@ -9,15 +10,14 @@ use lib::compile_and_run::compile_and_run_suites;
 use lib::compile_and_run::SuiteError;
 use lib::formatting;
 use std::num::NonZeroI32;
-use std::path::PathBuf;
 use std::process;
 
-fn get_exit_code(suite_result: &Result<(), SuiteError>) -> i32 {
+fn get_exit_code<P>(suite_result: &Result<(), SuiteError<P>>) -> i32 {
     use SuiteError::*;
 
     match suite_result {
         Err(ref suite_error) => match suite_error {
-            SuiteNotExist(_) | SuiteNotDir(_) | SuiteNotElm(_) => 0x28,
+            SuiteNotExist | SuiteNotDir | SuiteNotElm => 0x28,
 
             Failure {
                 reason, allowed, ..
@@ -60,18 +60,64 @@ Running SSCCE {}:",
                 welcome_message,
                 suite.display()
             );
-            let suite_result =
-                compile_and_run_suite(suite, out_dir.as_ref().map(PathBuf::as_ref), &instructions);
+            let suite_result = compile_and_run_suite(suite, out_dir.as_ref(), &instructions);
             match suite_result {
                 Ok(()) => println!(" Success"),
-                Err(ref e) => println!("\n\n{}", e),
+                Err(ref e) => println!("\n\n{}", formatting::suite_error(e, suite)),
             }
             NonZeroI32::new(get_exit_code(&suite_result))
         }
         cli::Task::RunSuites(ref suite_dir) => match lib::find_suites::find_suites(&suite_dir) {
             Ok(suites) => {
-                let suite_results = compile_and_run_suites(welcome_message, &suites, &instructions);
-                let code = suite_results.iter().fold(0, |a, b| a | get_exit_code(&b.1));
+                assert!(!suites.is_empty());
+                println!(
+                    "{}
+
+Running the following {} SSCCE{}:
+{}
+",
+                    welcome_message,
+                    suites.len(),
+                    if suites.len() == 1 { "" } else { "s" },
+                    indented::indented(formatting::easy_format(|f| {
+                        for path in suites.iter() {
+                            writeln!(f, "{}", path.display())?
+                        }
+                        Ok(())
+                    }))
+                );
+
+                let suite_results: Vec<_> =
+                    compile_and_run_suites(suites.iter(), &instructions).collect();
+                println!(
+                    "
+elm-torture has run the following {} SSCCE{}:
+{}
+",
+                    suites.len(),
+                    if suites.len() == 1 { "" } else { "s" },
+                    indented::indented(formatting::easy_format(|f| {
+                        for (suite, result) in &suite_results {
+                            writeln!(
+                                f,
+                                "{} ({})",
+                                suite.display(),
+                                match result {
+                                    Err(SuiteError::Failure { allowed: true, .. }) =>
+                                        "allowed failure".yellow(),
+                                    Err(SuiteError::ExpectedFailure) =>
+                                        "success when failure expected".red(),
+                                    Err(_) => "failure".red(),
+                                    Ok(_) => "success".green(),
+                                }
+                            )?
+                        }
+                        Ok(())
+                    }))
+                );
+                let code = suite_results
+                    .iter()
+                    .fold(0, |code, (_, res)| code | get_exit_code(res));
                 NonZeroI32::new(code)
             }
             Err(ref err) => {
