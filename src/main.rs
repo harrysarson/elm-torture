@@ -5,30 +5,32 @@ mod lib;
 use colored::Colorize;
 use lib::cli;
 use lib::formatting;
-use lib::run;
-use lib::run::compile_and_run_suite;
-use lib::run::compile_and_run_suites;
-use lib::run::SuiteError;
+use lib::suite::compile_and_run;
+use lib::suite::compile_and_run_suites;
+use lib::suite::CompileAndRunError;
 use std::num::NonZeroI32;
 use std::process;
 
-fn get_exit_code<P>(suite_result: &Result<(), SuiteError<P>>) -> i32 {
-    use SuiteError::*;
+fn get_exit_code<P>(suite_result: &Result<(), CompileAndRunError<P>>) -> i32 {
+    use CompileAndRunError::*;
 
     match suite_result {
-        Err(ref suite_error) => match suite_error {
+        Err(ref compile_and_run_error) => match compile_and_run_error {
             SuiteNotExist | SuiteNotDir | SuiteNotElm => 0x28,
 
-            Failure {
-                reason, allowed, ..
-            } => {
+            CompileFailure { allowed, .. } => {
                 if *allowed {
                     0
                 } else {
-                    match reason {
-                        run::CompileAndRunError::Compiler(_) => 0x21,
-                        run::CompileAndRunError::Runner(_) => 0x22,
-                    }
+                    0x21
+                }
+            }
+
+            RunFailure { allowed, .. } => {
+                if *allowed {
+                    0
+                } else {
+                    0x22
                 }
             }
 
@@ -60,10 +62,13 @@ Running SSCCE {}:",
                 welcome_message,
                 suite.display()
             );
-            let suite_result = compile_and_run_suite(suite, out_dir.as_ref(), &instructions);
+            let suite_result = compile_and_run(suite, out_dir.as_ref(), &instructions);
             match suite_result {
                 Ok(()) => println!(" Success"),
-                Err(ref e) => println!("\n\n{}", formatting::suite_error(e, suite)),
+                Err(ref e) => println!(
+                    "\n\n{}",
+                    formatting::compile_and_run_error(e, suite, out_dir.as_ref())
+                ),
             }
             NonZeroI32::new(get_exit_code(&suite_result))
         }
@@ -103,9 +108,14 @@ elm-torture has run the following {} SSCCE{}:
                                 "{} ({})",
                                 suite.display(),
                                 match result {
-                                    Err(SuiteError::Failure { allowed: true, .. }) =>
-                                        "allowed failure".yellow(),
-                                    Err(SuiteError::ExpectedFailure) =>
+                                    Err(CompileAndRunError::RunFailure {
+                                        allowed: true, ..
+                                    }) => "allowed run failure".yellow(),
+                                    Err(CompileAndRunError::CompileFailure {
+                                        allowed: true,
+                                        ..
+                                    }) => "allowed compile failure".yellow(),
+                                    Err(CompileAndRunError::ExpectedFailure) =>
                                         "success when failure expected".red(),
                                     Err(_) => "failure".red(),
                                     Ok(_) => "success".green(),

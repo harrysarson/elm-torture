@@ -1,6 +1,6 @@
 use super::find_suites;
-use super::run;
-use super::run::SuiteError;
+use super::suite;
+use super::suite::CompileAndRunError;
 use std::fmt;
 use std::path::Path;
 use std::process;
@@ -35,12 +35,12 @@ fn process_output<'a>(output: &'a process::Output) -> impl fmt::Display + 'a {
 }
 
 fn compiler_error<'a, P1: AsRef<Path> + 'a, P2: AsRef<Path> + 'a>(
-    err: &'a run::CompileError,
+    err: &'a suite::CompileError,
     suite: P1,
-    out_dir: &'a run::OutDir<P2>,
+    out_dir: Option<P2>,
 ) -> impl fmt::Display + 'a {
     easy_format(move |f| {
-        use run::CompileError::*;
+        use suite::CompileError::*;
         match err {
             CompilerNotFound(err) => write!(
                 f,
@@ -62,23 +62,23 @@ fn compiler_error<'a, P1: AsRef<Path> + 'a, P2: AsRef<Path> + 'a>(
             }
 
             OutDirIsNotDir => {
-                if out_dir.is_tempory() {
-                    panic!("Invalid tempory directory: {}", out_dir.path().display())
-                } else {
+                if let Some(dir) = out_dir.as_ref() {
                     write!(
                         f,
                         "{} must either be a directory or a path where elm-torture can create one!",
-                        out_dir.path().display()
+                        dir.as_ref().display()
                     )
+                } else {
+                    panic!("Invalid tempory directory")
                 }
             }
         }
     })
 }
 
-fn run_error<'a>(err: &'a run::RunError, out_dir: &'a Path) -> impl fmt::Display + 'a {
+fn run_error<'a>(err: &'a suite::RunError, out_dir: &'a Path) -> impl fmt::Display + 'a {
     easy_format(move |f| {
-        use run::RunError::*;
+        use suite::RunError::*;
         match err {
             NodeNotFound(err) => write!(
                 f,
@@ -124,12 +124,13 @@ fn run_error<'a>(err: &'a run::RunError, out_dir: &'a Path) -> impl fmt::Display
     })
 }
 
-pub fn suite_error<'a, Pe: AsRef<Path>, Ps: AsRef<Path> + 'a>(
-    err: &'a SuiteError<Pe>,
+pub fn compile_and_run_error<'a, Pe: AsRef<Path>, Pp: AsRef<Path> + 'a, Ps: AsRef<Path> + 'a>(
+    err: &'a CompileAndRunError<Pe>,
     suite: Ps,
+    provided_path: Option<Pp>,
 ) -> impl fmt::Display + 'a {
     easy_format(move |f| {
-        use SuiteError::*;
+        use CompileAndRunError::*;
 
         match err {
             SuiteNotExist => write!(
@@ -150,26 +151,31 @@ pub fn suite_error<'a, Pe: AsRef<Path>, Ps: AsRef<Path> + 'a>(
                 suite.as_ref().display()
             ),
 
-            Failure {
+            CompileFailure { allowed, reason } => {
+                write!(
+                    f,
+                    "Failed to compile suite {}.\n{}\n",
+                    &suite.as_ref().display(),
+                    indented::indented(compiler_error(&reason, &suite, provided_path.as_ref()))
+                )?;
+                if *allowed {
+                    write!(f, "Failure allowed, continuing...")
+                } else {
+                    Ok(())
+                }
+            }
+
+            RunFailure {
                 allowed,
                 outdir,
                 reason,
             } => {
-                match &reason {
-                    run::CompileAndRunError::Compiler(err) => write!(
-                        f,
-                        "Failed to compile suite {}.\n{}\n",
-                        &suite.as_ref().display(),
-                        indented::indented(compiler_error(&err, &suite, outdir))
-                    ),
-
-                    run::CompileAndRunError::Runner(err) => write!(
-                        f,
-                        "Suite {} failed at run time.\n{}\n",
-                        &suite.as_ref().display(),
-                        indented::indented(run_error(&err, outdir.path()))
-                    ),
-                }?;
+                write!(
+                    f,
+                    "Suite {} failed at run time.\n{}\n",
+                    &suite.as_ref().display(),
+                    indented::indented(run_error(&reason, outdir.path()))
+                )?;
                 if *allowed {
                     write!(f, "Failure allowed, continuing...")
                 } else {

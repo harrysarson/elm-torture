@@ -1,3 +1,4 @@
+use super::cli;
 use super::config::Config;
 use super::formatting;
 use log::debug;
@@ -37,20 +38,18 @@ pub enum RunError {
 }
 
 #[derive(Debug)]
-pub enum CompileAndRunError {
-    Compiler(super::run::CompileError),
-    Runner(super::run::RunError),
-}
-
-#[derive(Debug)]
-pub enum SuiteError<P> {
+pub enum CompileAndRunError<P> {
     SuiteNotExist,
     SuiteNotDir,
     SuiteNotElm,
-    Failure {
+    CompileFailure {
+        allowed: bool,
+        reason: super::suite::CompileError,
+    },
+    RunFailure {
         allowed: bool,
         outdir: OutDir<P>,
-        reason: CompileAndRunError,
+        reason: super::suite::RunError,
     },
     ExpectedFailure,
 }
@@ -184,13 +183,6 @@ impl<P> OutDir<P> {
         }
     }
 
-    pub fn is_tempory(&self) -> bool {
-        match self {
-            Self::Provided(_) => false,
-            Self::Tempory(_) | Self::Persistent(_) => true,
-        }
-    }
-
     pub fn persist(&mut self) {
         replace_with::replace_with(
             self,
@@ -206,29 +198,19 @@ impl<P> OutDir<P> {
     }
 }
 
-pub fn compile_and_run(
-    suite: &Path,
-    out_dir: &Path,
-    config: &Config,
-) -> Result<(), CompileAndRunError> {
-    super::run::compile(&suite, &out_dir, &config).map_err(CompileAndRunError::Compiler)?;
-    super::run::run(&suite, &out_dir, &config).map_err(CompileAndRunError::Runner)?;
-    Ok(())
-}
-
-pub fn compile_and_run_suite<Ps: AsRef<Path>, Pe: AsRef<Path>>(
+pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     suite: Ps,
     provided_out_dir: Option<Pe>,
     instructions: &super::cli::Instructions,
-) -> Result<(), SuiteError<Pe>> {
+) -> Result<(), CompileAndRunError<Pe>> {
     if !suite.as_ref().exists() {
-        return Err(SuiteError::SuiteNotExist);
+        return Err(CompileAndRunError::SuiteNotExist);
     }
     if !suite.as_ref().is_dir() {
-        return Err(SuiteError::SuiteNotDir);
+        return Err(CompileAndRunError::SuiteNotDir);
     }
     if !suite.as_ref().join("elm.json").exists() {
-        return Err(SuiteError::SuiteNotElm);
+        return Err(CompileAndRunError::SuiteNotElm);
     }
     let failure_allowed = instructions.config.allowed_failures.iter().any(|p| {
         if p.exists() {
@@ -266,35 +248,58 @@ pub fn compile_and_run_suite<Ps: AsRef<Path>, Pe: AsRef<Path>>(
         OutDir::Tempory(dir)
     };
 
-    let run_result = compile_and_run(&suite.as_ref(), out_dir.path(), &instructions.config);
+    super::suite::compile(suite.as_ref(), out_dir.path(), &instructions.config).map_err(|e| {
+        CompileAndRunError::CompileFailure {
+            allowed: failure_allowed,
+            reason: e,
+        }
+    })?;
 
-    if let Err(CompileAndRunError::Runner(super::run::RunError::Runtime(_))) = run_result {
-        out_dir.persist()
-    };
-
-    if failure_allowed && run_result.is_ok() {
-        Err(SuiteError::ExpectedFailure)
-    } else {
-        run_result.map_err(|err| SuiteError::Failure {
+    super::suite::run(suite.as_ref(), out_dir.path(), &instructions.config).map_err(|e| {
+        out_dir.persist();
+        CompileAndRunError::RunFailure {
             allowed: failure_allowed,
             outdir: out_dir,
-            reason: err,
-        })
+            reason: e,
+        }
+    })?;
+
+    // if let Err(CompileAndRunError::Runner(super::suite::RunError::Runtime(_))) = run_result {
+    //     out_dir.persist()
+    // };
+
+    if failure_allowed {
+        Err(CompileAndRunError::ExpectedFailure)
+    } else {
+        Ok(())
     }
 }
 
 pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
     suites: impl Iterator<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
-) -> impl Iterator<Item = (Ps, Result<(), SuiteError<&Path>>)> + 'a {
+) -> impl Iterator<Item = (Ps, Result<(), CompileAndRunError<&Path>>)> + 'a {
     suites
         .map(move |suite: Ps| {
-            let res = compile_and_run_suite(&suite, None, instructions);
+            let res: Result<(), CompileAndRunError<&Path>> =
+                compile_and_run(&suite, None, instructions);
             if let Err(ref e) = res {
-                println!("{}", formatting::suite_error(e, &suite));
+                println!(
+                    "{}",
+                    formatting::compile_and_run_error(
+                        e,
+                        &suite,
+                        match instructions.task {
+                            cli::Task::RunSuite { ref out_dir, .. } => out_dir.as_ref(),
+                            _ => None,
+                        }
+                    )
+                );
             }
             let failed = match res {
-                Err(SuiteError::Failure { allowed: true, .. }) | Ok(_) => false,
+                Err(CompileAndRunError::CompileFailure { allowed: true, .. })
+                | Err(CompileAndRunError::RunFailure { allowed: true, .. })
+                | Ok(_) => false,
                 Err(_) => true,
             };
             ((suite, res), failed)
