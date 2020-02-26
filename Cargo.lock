@@ -103,7 +103,7 @@ dependencies = [
  "indented 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "replace_with 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "rust-embed 5.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rust-embed 5.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "same-file 1.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.104 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.48 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -289,17 +289,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "rust-embed"
-version = "5.3.0"
+version = "5.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "rust-embed-impl 5.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rust-embed-impl 5.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rust-embed-utils 5.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "walkdir 2.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "rust-embed-impl"
-version = "5.3.0"
+version = "5.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "quote 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -516,8 +516,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum regex-syntax 0.6.14 (registry+https://github.com/rust-lang/crates.io-index)" = "b28dfe3fe9badec5dbf0a79a9cccad2cfc2ab5484bdb3e44cbd1ae8b3ba2be06"
 "checksum remove_dir_all 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)" = "4a83fa3702a688b9359eccba92d153ac33fd2e8462f9e0e3fdf155239ea7792e"
 "checksum replace_with 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "e76286384e3eeae2f41cd5622841781b466a5de4a6be5c8756056e843833e7aa"
-"checksum rust-embed 5.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "412cddb9905679491f2829ef7fea79179b9a76fa942e06ab52b420dbab94a406"
-"checksum rust-embed-impl 5.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "50212d0e652f580e6d297537c31237d4b2f4497e5912eebe25fde97ac06a51df"
+"checksum rust-embed 5.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "20eb43fdf7722a83abfcbc60e10a99c0940d3f07ca69a643edee10bf174240ff"
+"checksum rust-embed-impl 5.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c44c2cbb1a7168b8232ce002b83ebe0c669414d53d6deb38994222d995027f97"
 "checksum rust-embed-utils 5.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "97655158074ccb2d2cfb1ccb4c956ef0f4054e43a2c1e71146d4991e6961e105"
 "checksum rustc-demangle 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)" = "4c691c0e608126e00913e33f0ccf3727d5fc84573623b8d65b2df340b5201783"
 "checksum ryu 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "bfa8506c1de11c9c4e4c38863ccbe02a305c8188e85a05a784c9e11e1c3910c8"
