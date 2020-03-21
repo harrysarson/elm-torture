@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::process;
 use std::process::Command;
 use std::str;
+use std::env;
 use std::string;
 
 #[derive(Debug)]
@@ -87,6 +88,9 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Comp
     command.args(root_files);
     command.args(config.args.iter());
     command.arg("--output");
+    if let Some(elm_home) = env::var_os("ELM_HOME") {
+        command.env("ELM_HOME", elm_home);
+    }
     command.arg(
         fs::canonicalize(out_dir)
             .map_err(CompileError::Process)?
