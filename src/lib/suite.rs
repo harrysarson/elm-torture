@@ -7,6 +7,7 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
@@ -129,22 +130,19 @@ pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), RunError
         String::from_utf8(data).map_err(RunError::ExpectedOutputNotUtf8)?
     };
 
-    fs::write(
-        &out_file,
-        format!(
-            r#"
+    write!(
+        &File::create(&out_file).map_err(RunError::WritingHarness)?,
+        r#"
 const {{ Elm }} = require('./elm.js');
 const expectedOutput = JSON.parse(String.raw`{}`);
 {}
 
 module.exports(Elm, expectedOutput);
 "#,
-            &expected_output,
-            str::from_utf8(include_bytes!("../../embed-assets/run.js"))
-                .expect("Embedded js template should be valid utf8."),
-        ),
+        &expected_output,
+        str::from_utf8(include_bytes!("../../embed-assets/run.js"))
+            .expect("Embedded js template should be valid utf8."),
     )
-    .map(|_| ())
     .map_err(RunError::WritingHarness)?;
 
     let res = Command::new(node_exe)
