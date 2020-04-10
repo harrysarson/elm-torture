@@ -135,9 +135,14 @@ pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), RunError
         r#"
 const {{ Elm }} = require('./elm.js');
 const expectedOutput = JSON.parse(String.raw`{}`);
-{}
 
-module.exports(Elm, expectedOutput);
+function harness(module, exports) {{
+{}
+}}
+
+const m = {{ exports: {{}} }};
+harness(m, m.exports);
+m.exports(Elm, expectedOutput);
 "#,
         &expected_output,
         str::from_utf8(include_bytes!("../../embed-assets/run.js"))
