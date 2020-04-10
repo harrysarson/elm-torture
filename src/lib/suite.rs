@@ -2,6 +2,7 @@ use super::cli;
 use super::config::Config;
 use super::formatting;
 use log::debug;
+use std::env;
 use std::fs;
 use std::fs::File;
 use std::io;
@@ -11,7 +12,6 @@ use std::path::PathBuf;
 use std::process;
 use std::process::Command;
 use std::str;
-use std::env;
 use std::string;
 
 #[derive(Debug)]
