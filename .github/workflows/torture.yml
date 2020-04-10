@@ -1,6 +1,12 @@
 name: Torture
 
-on: push
+on:
+  push:
+    branches:
+      - staging
+      - trying
+
+  pull_request:
 
 jobs:
   ci:
