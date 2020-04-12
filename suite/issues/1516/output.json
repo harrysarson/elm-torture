@@ -1,7 +1,9 @@
 {
-    "ports": {
-        "write": [
+    "ports": [
+        [
+            "command",
+            "write",
             "1"
         ]
-    }
+    ]
 }

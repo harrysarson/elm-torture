@@ -1,6 +1,8 @@
 {
-    "ports": {
-        "echo": [
+    "ports": [
+        [
+            "command",
+            "echo",
             {
                 "arguments": 3,
                 "default": 1,
@@ -10,5 +12,5 @@
                 "this": 4
             }
         ]
-    }
+    ]
 }

@@ -1,6 +1,11 @@
 {
     "ports": [
         [
+            "subscription",
+            "read",
+            "Hello World!"
+        ],
+        [
             "command",
             "write",
             "Hello World!"

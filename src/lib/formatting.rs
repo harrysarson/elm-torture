@@ -115,6 +115,11 @@ fn run_error<'a>(err: &'a suite::RunError, out_dir: &'a Path) -> impl fmt::Displ
                 ]
                 .join("\n")
             ),
+            ExpectedOutputPathNotUtf8(p) => write!(
+                f,
+                "The canonical path to the expected output json file ({}) is not valid utf8",
+                p.display()
+            ),
             OutputProduced(output) => write!(
                 f,
                 "The suite ran without error but produced the following output!:\n{}",

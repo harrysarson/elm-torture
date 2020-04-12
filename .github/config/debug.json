@@ -2,6 +2,7 @@
   "elm_compiler": "elm",
   "node": "node",
   "args": ["--debug"],
+  "compiler_reruns": 3,
   "allowed_failures": [
     "../../suite/issues/1246",
     "../../suite/issues/1813",
