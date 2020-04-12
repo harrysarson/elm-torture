@@ -134,14 +134,6 @@ pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), RunError
     let canonical_expected_output_path = expected_output_path
         .canonicalize()
         .map_err(|_| RunError::CannotFindExpectedOutput)?;
-    // let expected_output = {
-    //     let mut data = Vec::new();
-    //     File::open(expected_output_path)
-    //         .map_err(|_| RunError::CannotFindExpectedOutput)?
-    //         .read(&mut data)
-    //         .map_err(RunError::CopyingExpectedOutput)?;
-    //     data
-    // };
 
     fs::write(
         &harness_file,
@@ -159,7 +151,7 @@ const expectedOutput = require('{}');
 harness(Elm, expectedOutput);
 "#,
         match canonical_expected_output_path.to_str() {
-            Some(p) => p,
+            Some(p) => p.replace('\\', "\\\\"),
             None =>
                 return Err(RunError::ExpectedOutputPathNotUtf8(
                     canonical_expected_output_path
