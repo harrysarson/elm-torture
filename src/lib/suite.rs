@@ -37,6 +37,7 @@ pub enum RunError {
     CannotFindExpectedOutput,
     ExpectedOutputNotUtf8(string::FromUtf8Error),
     OutputProduced(process::Output),
+    ExpectedOutputPathNotUtf8(PathBuf),
 }
 
 #[derive(Debug)]
@@ -119,40 +120,49 @@ pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), RunError
     }
     let expected_output_path = suite.join("output.json");
     let node_exe = which::which(&config.node).map_err(RunError::NodeNotFound)?;
-    let out_file = out_dir.join("harness.js");
+    let harness_file = out_dir.join("harness.js");
+    let main_file = out_dir.join("main.js");
 
-    let expected_output = {
-        let mut data = Vec::new();
-        File::open(expected_output_path)
-            .map_err(|_| RunError::CannotFindExpectedOutput)?
-            .read_to_end(&mut data)
-            .map_err(RunError::CopyingExpectedOutput)?;
-        String::from_utf8(data).map_err(RunError::ExpectedOutputNotUtf8)?
-    };
+    let canonical_expected_output_path = expected_output_path
+        .canonicalize()
+        .map_err(|_| RunError::CannotFindExpectedOutput)?;
+    // let expected_output = {
+    //     let mut data = Vec::new();
+    //     File::open(expected_output_path)
+    //         .map_err(|_| RunError::CannotFindExpectedOutput)?
+    //         .read(&mut data)
+    //         .map_err(RunError::CopyingExpectedOutput)?;
+    //     data
+    // };
+
+    fs::write(
+        &harness_file,
+        &include_bytes!("../../embed-assets/run.js")[..],
+    )
+    .map_err(RunError::WritingHarness)?;
 
     write!(
-        &File::create(&out_file).map_err(RunError::WritingHarness)?,
+        &File::create(&main_file).map_err(RunError::WritingHarness)?,
         r#"
 const {{ Elm }} = require('./elm.js');
-const expectedOutput = JSON.parse(String.raw`{}`);
+const harness = require('./harness.js');
+const expectedOutput = require('{}');
 
-function harness(module, exports) {{
-{}
-}}
-
-const m = {{ exports: {{}} }};
-harness(m, m.exports);
-m.exports(Elm, expectedOutput);
+harness(Elm, expectedOutput);
 "#,
-        &expected_output,
-        str::from_utf8(include_bytes!("../../embed-assets/run.js"))
-            .expect("Embedded js template should be valid utf8."),
+        match canonical_expected_output_path.to_str() {
+            Some(p) => p,
+            None =>
+                return Err(RunError::ExpectedOutputPathNotUtf8(
+                    canonical_expected_output_path
+                )),
+        }
     )
     .map_err(RunError::WritingHarness)?;
 
     let res = Command::new(node_exe)
         .arg("--unhandled-rejections=strict")
-        .arg(out_file)
+        .arg(&main_file)
         .output()
         .map_err(RunError::NodeProcess)?;
 
