@@ -9,7 +9,8 @@ on:
   pull_request:
 
 jobs:
-  Test:
+  test:
+    name: Test
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -47,7 +48,8 @@ jobs:
           command: clippy
           args: --all
 
-  Torture:
+  torture:
+    name: Torture
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
