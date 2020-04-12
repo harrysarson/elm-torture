@@ -1,8 +1,14 @@
 {
-    "ports": {
-        "write": [
-            "load",
+    "ports": [
+        [
+            "command",
+            "write",
+            "load"
+        ],
+        [
+            "command",
+            "write",
             "tick"
         ]
-    }
+    ]
 }
