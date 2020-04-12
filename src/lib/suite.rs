@@ -101,7 +101,15 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Comp
 
     debug!("Invoking compiler: {:?}", command);
 
-    let res = command.output().map_err(CompileError::Process)?;
+    let res = (|| {
+        for _ in 0..(config.compiler_reruns.get() - 1) {
+            let op = command.output().map_err(CompileError::Process)?;
+            if op.status.success() {
+                return Ok(op);
+            }
+        }
+        command.output().map_err(CompileError::Process)
+    })()?;
 
     if !res.status.success() {
         return Err(CompileError::Compiler(res));
