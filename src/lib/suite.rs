@@ -101,14 +101,27 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Comp
 
     debug!("Invoking compiler: {:?}", command);
 
+    let mut compile = || {
+        fs::remove_dir_all(suite.join("elm-stuff"))
+            .or_else(|e| {
+                if e.kind() == io::ErrorKind::NotFound {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            })
+            .expect("Could not delete elm-stuff directory");
+        command.output().map_err(CompileError::Process)
+    };
+
     let res = (|| {
         for _ in 0..(config.compiler_reruns.get() - 1) {
-            let op = command.output().map_err(CompileError::Process)?;
+            let op = compile()?;
             if op.status.success() {
                 return Ok(op);
             }
         }
-        command.output().map_err(CompileError::Process)
+        compile()
     })()?;
 
     if !res.status.success() {
@@ -243,15 +256,6 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
             false
         }
     });
-    fs::remove_dir_all(suite.as_ref().join("elm-stuff"))
-        .or_else(|e| {
-            if e.kind() == io::ErrorKind::NotFound {
-                Ok(())
-            } else {
-                Err(e)
-            }
-        })
-        .expect("Could not delete elm-stuff directory");
 
     let mut out_dir = if let Some(dir) = provided_out_dir {
         OutDir::Provided(dir)
