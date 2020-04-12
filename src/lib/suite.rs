@@ -233,17 +233,15 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
             false
         }
     });
-    if instructions.clear_elm_stuff {
-        fs::remove_dir_all(suite.as_ref().join("elm-stuff"))
-            .or_else(|e| {
-                if e.kind() == io::ErrorKind::NotFound {
-                    Ok(())
-                } else {
-                    Err(e)
-                }
-            })
-            .expect("Could not delete elm-stuff directory");
-    }
+    fs::remove_dir_all(suite.as_ref().join("elm-stuff"))
+        .or_else(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                Ok(())
+            } else {
+                Err(e)
+            }
+        })
+        .expect("Could not delete elm-stuff directory");
 
     let mut out_dir = if let Some(dir) = provided_out_dir {
         OutDir::Provided(dir)
