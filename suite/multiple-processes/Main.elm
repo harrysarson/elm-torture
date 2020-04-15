@@ -39,7 +39,7 @@ update msg counter =
             )
 
         Done ->
-            ( (), Cmd.none )
+            ( (), Util.Cmds.write "done" )
 
 
 main : Platform.Program () () Msg

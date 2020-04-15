@@ -57,12 +57,10 @@ module.exports = function (Elm, output) {
     sendIfNextEventSubscription();
 
     process.on('exit', () => {
-        if (app.ports !== undefined) {
-            assert(
-                portEventIndex == ports.length,
-                `There have been ${portEventIndex} port events but should have been exactly ${ports.length} port events.`,
-            );
-        }
+        assert(
+            portEventIndex == ports.length,
+            `There have been ${portEventIndex} port events but should have been exactly ${ports.length} port events.`,
+        );
     });
 
 }
