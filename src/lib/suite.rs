@@ -12,7 +12,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 use std::process::Command;
-use std::str;
 use std::string;
 
 #[derive(Debug)]
@@ -26,6 +25,7 @@ pub enum CompileError {
     OutDirIsNotDir,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum RunError {
     NodeNotFound(which::Error),
@@ -298,8 +298,10 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
     suites: impl Iterator<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
 ) -> impl Iterator<Item = (Ps, Result<(), CompileAndRunError<&Path>>)> + 'a {
-    suites
-        .map(move |suite: Ps| {
+    suites.scan(false, move |prev_run_failed, suite: Ps| {
+        if instructions.fail_fast && *prev_run_failed {
+            None
+        } else {
             let res: Result<(), CompileAndRunError<&Path>> =
                 compile_and_run(&suite, None, instructions);
             if let Err(ref e) = res {
@@ -321,8 +323,8 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
                 | Ok(_) => false,
                 Err(_) => true,
             };
-            ((suite, res), failed)
-        })
-        .take_while(move |(_, failed)| !(instructions.fail_fast && *failed))
-        .map(|(tup, _)| tup)
+            *prev_run_failed = failed;
+            Some((suite, res))
+        }
+    })
 }
