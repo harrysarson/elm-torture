@@ -1,3 +1,5 @@
+#![allow(clippy::enum_glob_use)]
+
 use super::find_suites;
 use super::suite;
 use super::suite::CompileAndRunError;

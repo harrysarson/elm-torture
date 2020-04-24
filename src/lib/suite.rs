@@ -64,7 +64,11 @@ pub enum OutDir<P> {
     Persistent(PathBuf),
 }
 
-pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), CompileError> {
+pub fn compile(
+    suite: &Path,
+    out_dir: &Path,
+    config: &Config<impl AsRef<Path>>,
+) -> Result<(), CompileError> {
     if !out_dir.exists() {
         let _ = fs::create_dir(out_dir);
     } else if !out_dir.is_dir() {
@@ -83,12 +87,12 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Comp
         vec![String::from("Main.elm")]
     };
     let elm_compiler =
-        which::which(&config.elm_compiler).map_err(CompileError::CompilerNotFound)?;
+        which::which(&config.elm_compiler()).map_err(CompileError::CompilerNotFound)?;
     let mut command = Command::new(elm_compiler);
     command.current_dir(suite);
     command.arg("make");
     command.args(root_files);
-    command.args(config.args.iter());
+    command.args(config.args().iter());
     command.arg("--output");
     if let Some(elm_home) = env::var_os("ELM_HOME") {
         command.env("ELM_HOME", elm_home);
@@ -115,7 +119,7 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Comp
     };
 
     let res = (|| {
-        for _ in 0..(config.compiler_reruns.get() - 1) {
+        for _ in 0..(config.compiler_reruns().get() - 1) {
             let op = compile()?;
             if op.status.success() {
                 return Ok(op);
@@ -135,12 +139,16 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Comp
     Ok(())
 }
 
-pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), RunError> {
+pub fn run(
+    suite: &Path,
+    out_dir: &Path,
+    config: &Config<impl AsRef<Path>>,
+) -> Result<(), RunError> {
     if !suite.join("elm.json").exists() {
         return Err(RunError::SuiteDoesNotExist);
     }
     let expected_output_path = suite.join("output.json");
-    let node_exe = which::which(&config.node).map_err(RunError::NodeNotFound)?;
+    let node_exe = which::which(&config.node()).map_err(RunError::NodeNotFound)?;
     let harness_file = out_dir.join("harness.js");
     let main_file = out_dir.join("main.js");
 
@@ -242,13 +250,13 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     if !suite.as_ref().join("elm.json").exists() {
         return Err(CompileAndRunError::SuiteNotElm);
     }
-    let failure_allowed = instructions.config.allowed_failures.iter().any(|p| {
-        if p.exists() {
+    let failure_allowed = instructions.config.allowed_failures().iter().any(|p| {
+        if p.as_ref().exists() {
             same_file::is_same_file(&suite, p).unwrap_or_else(|e| {
                 panic!(
                     "Error when comparing the paths {:?} and {:?}: {:?}",
                     suite.as_ref(),
-                    p,
+                    p.as_ref(),
                     e
                 )
             })

@@ -3,11 +3,10 @@ use crate::lib::config::Config;
 use clap::App;
 use clap::Arg;
 use std::fs::File;
-use std::path::Path;
 use std::path::PathBuf;
 
 pub enum Task {
-    DumpConfig,
+    DumpConfig(PathBuf),
     RunSuite {
         suite: PathBuf,
         out_dir: Option<PathBuf>,
@@ -16,7 +15,7 @@ pub enum Task {
 }
 
 pub struct Instructions {
-    pub config: config::Config,
+    pub config: config::Config<PathBuf>,
     pub fail_fast: bool,
     pub task: Task,
 }
@@ -58,8 +57,10 @@ pub fn get_cli_task() -> Instructions {
                 .takes_value(true)  )
         .arg(
             Arg::with_name("show_config")
-                .long("showConfig")
-                .help("Dump the configuration"),
+                .long("show-config")
+                .value_name("FILE")
+                .help("Dump the configuration to FILE")
+                .takes_value(true),
         )
         .arg(
             Arg::with_name("fail_fast")
@@ -70,31 +71,24 @@ pub fn get_cli_task() -> Instructions {
 
     let fail_fast = matches.is_present("fail_fast");
 
-    let config = {
+    let config: Config<PathBuf> = {
         let config_file = matches.value_of_os("config");
 
-        let mut deserialised: Config = config_file
-            .map(|p| File::open(p).expect("config file not found"))
-            .map(|file| {
-                serde_json::from_reader(file).expect("error while reading json configuration file")
+        config_file
+            .map(|p| {
+                let file = File::open(p).expect("config file not found");
+                let config: config::Config<config::RelativePath> = serde_json::from_reader(file)
+                    .expect("error while reading json configuration file");
+                config.into_config(p)
             })
-            .unwrap_or_default();
-
-        if let Some(config_dir) = config_file.map(Path::new).and_then(Path::parent) {
-            deserialised.allowed_failures = deserialised
-                .allowed_failures
-                .iter()
-                .map(|p| config_dir.join(p))
-                .collect();
-        }
-        deserialised
+            .unwrap_or_default()
     };
 
     Instructions {
         config,
         fail_fast,
-        task: if matches.is_present("show_config") {
-            Task::DumpConfig
+        task: if let Some(config_file) = matches.value_of("show_config") {
+            Task::DumpConfig(config_file.into())
         } else if let Some(suites) = matches.value_of("suites") {
             Task::RunSuites(
                 suites

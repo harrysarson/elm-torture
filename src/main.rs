@@ -9,8 +9,9 @@ use lib::suite::compile_and_run;
 use lib::suite::compile_and_run_suites;
 use lib::suite::CompileAndRunError;
 use std::num::NonZeroI32;
-use std::process;
+use std::{fs, process};
 
+#[allow(clippy::enum_glob_use)]
 fn get_exit_code<P>(suite_result: &Result<(), CompileAndRunError<P>>) -> i32 {
     use CompileAndRunError::*;
 
@@ -40,15 +41,13 @@ fn get_exit_code<P>(suite_result: &Result<(), CompileAndRunError<P>>) -> i32 {
     }
 }
 
-fn run_app(instructions: &cli::Instructions) -> Option<NonZeroI32> {
+fn run_app(instructions: cli::Instructions) -> Option<NonZeroI32> {
     let welcome_message = "Elm Torture - stress tests for an elm compiler";
-    match instructions.task {
-        cli::Task::DumpConfig => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&instructions.config)
-                    .expect("could not serialize config")
-            );
+    match &instructions.task {
+        cli::Task::DumpConfig(config_file) => {
+            let file = fs::File::create(config_file).expect("could create config file");
+            serde_json::to_writer_pretty(file, &instructions.config.serialize(config_file))
+                .expect("could not serialize config");
             None
         }
         cli::Task::RunSuite {
@@ -139,5 +138,5 @@ elm-torture has run the following {} SSCCE{}:
 }
 fn main() {
     env_logger::init();
-    process::exit(run_app(&cli::get_cli_task()).map_or(0, NonZeroI32::get));
+    process::exit(run_app(cli::get_cli_task()).map_or(0, NonZeroI32::get));
 }
