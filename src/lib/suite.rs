@@ -1,27 +1,29 @@
 use super::cli;
 use super::config::Config;
 use super::formatting;
+use futures::future;
+use futures::future::Either;
 use futures::future::TryFutureExt;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
 use log::debug;
+use process::{Output, Stdio};
 use std::env;
 use std::fs;
 use std::fs::File;
-use std::io;
-use std::io::Read;
-use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
-use std::process;
 use std::{
-    string,
+    io::Read,
+    io::Write,
+    path::Path,
+    path::PathBuf,
+    process, string,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Duration,
 };
-use tokio::process::Command;
+use tokio::{io, process::Command, time};
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -47,6 +49,11 @@ pub enum RunError {
     ExpectedOutputNotUtf8(string::FromUtf8Error),
     OutputProduced(process::Output),
     ExpectedOutputPathNotUtf8(PathBuf),
+    Timeout {
+        after: Duration,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
 }
 
 #[derive(Debug)]
@@ -155,6 +162,15 @@ pub async fn run(
     out_dir: &Path,
     config: &Config<impl AsRef<Path>>,
 ) -> Result<(), RunError> {
+    async fn read_to_buf(mut read: impl io::AsyncRead + Unpin) -> io::Result<Vec<u8>> {
+        use io::AsyncReadExt;
+        let mut buffer = Vec::new();
+
+        // read the whole file
+        read.read_to_end(&mut buffer).await?;
+        Ok(buffer)
+    }
+
     if !suite.join("elm.json").exists() {
         return Err(RunError::SuiteDoesNotExist);
     }
@@ -192,18 +208,46 @@ harness(Elm, expectedOutput);
     )
     .map_err(RunError::WritingHarness)?;
 
-    let res = Command::new(node_exe)
+    let mut runner_child = Command::new(node_exe)
         .arg("--unhandled-rejections=strict")
         .arg(&main_file)
-        .output()
-        .await
+        .stdout(Stdio::piped())
+        .stdin(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(RunError::NodeProcess)?;
 
-    if !res.status.success() {
-        return Err(RunError::Runtime(res));
+    let maybe_timedout =
+        future::select(time::delay_for(config.run_timeout()), &mut runner_child).await;
+
+    let runner_status = match maybe_timedout {
+        Either::Left(((), child)) => {
+            let () = child.kill().map_err(RunError::NodeProcess)?;
+            let stdout = child.stdout.as_mut().unwrap();
+            let stderr = child.stderr.as_mut().unwrap();
+            return Err(RunError::Timeout {
+                after: config.run_timeout(),
+                stdout: read_to_buf(stdout).await.map_err(RunError::NodeProcess)?,
+                stderr: read_to_buf(stderr).await.map_err(RunError::NodeProcess)?,
+            });
+        }
+        Either::Right((status, _)) => status.map_err(RunError::NodeProcess)?,
+    };
+
+    let stdout = &mut runner_child.stdout.unwrap();
+    let stderr = &mut runner_child.stderr.unwrap();
+
+    let output = Output {
+        status: runner_status,
+        stdout: read_to_buf(stdout).await.map_err(RunError::NodeProcess)?,
+        stderr: read_to_buf(stderr).await.map_err(RunError::NodeProcess)?,
+    };
+
+    if !output.status.success() {
+        return Err(RunError::Runtime(output));
     }
-    if !res.stdout.is_empty() {
-        return Err(RunError::OutputProduced(res));
+    if !output.stdout.is_empty() {
+        return Err(RunError::OutputProduced(output));
     }
     let possible_stderr = |mode| {
         format!(
@@ -211,11 +255,11 @@ harness(Elm, expectedOutput);
             mode
         ).into_bytes()
     };
-    if !res.stderr.is_empty()
-        && res.stderr[..] != *possible_stderr("DEV")
-        && res.stderr[..] != *possible_stderr("DEBUG")
+    if !output.stderr.is_empty()
+        && output.stderr[..] != *possible_stderr("DEV")
+        && output.stderr[..] != *possible_stderr("DEBUG")
     {
-        return Err(RunError::OutputProduced(res));
+        return Err(RunError::OutputProduced(output));
     }
 
     Ok(())

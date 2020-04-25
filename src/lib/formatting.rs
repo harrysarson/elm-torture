@@ -25,13 +25,33 @@ fn process_output<'a>(output: &'a process::Output) -> impl fmt::Display + 'a {
             f,
             r#"
  = Exit code: {} =
- = Std Out =
 {}
- = Std Err =
 {}"#,
             output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+            process_stdout(&output.stdout),
+            process_stderr(&output.stderr)
+        )
+    })
+}
+
+fn process_stdout<'a>(stdout: &'a Vec<u8>) -> impl fmt::Display + 'a {
+    easy_format(move |f| {
+        write!(
+            f,
+            r#" = Std Out =
+{}"#,
+            String::from_utf8_lossy(stdout)
+        )
+    })
+}
+
+fn process_stderr<'a>(stderr: &'a Vec<u8>) -> impl fmt::Display + 'a {
+    easy_format(move |f| {
+        write!(
+            f,
+            r#" = Std Err =
+{}"#,
+            String::from_utf8_lossy(stderr)
         )
     })
 }
@@ -126,6 +146,29 @@ fn run_error<'a>(err: &'a suite::RunError, out_dir: &'a Path) -> impl fmt::Displ
                 f,
                 "The suite ran without error but produced the following output!:\n{}",
                 process_output(&output)
+            ),
+            Timeout {
+                after,
+                stdout,
+                stderr,
+            } => write!(
+                f,
+                "Running of the suite was stopped after {:?}.{}",
+                after,
+                easy_format(|f| {
+                    if !stdout.is_empty() || !stderr.is_empty() {
+                        write!(
+                            f,
+                            " Before it stopped the process procuduced the following output:
+{}
+{}",
+                            process_stdout(stdout),
+                            process_stderr(stderr)
+                        )
+                    } else {
+                        write!(f, "(The process prouduced no output)")
+                    }
+                })
             ),
         }
     })

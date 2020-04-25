@@ -119,7 +119,7 @@ impl<P: AsRef<Path>> Config<P> {
             .unwrap_or_else(|| NonZeroI32::new(1).unwrap())
     }
 
-    // pub fn run_timeout(&self) -> Duration {
-    //     self.run_timeout.unwrap_or_else(|| Duration::new(10, 0))
-    // }
+    pub fn run_timeout(&self) -> Duration {
+        self.run_timeout.unwrap_or_else(|| Duration::new(10, 0))
+    }
 }
