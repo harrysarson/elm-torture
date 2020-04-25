@@ -1,18 +1,29 @@
 use super::cli;
 use super::config::Config;
 use super::formatting;
+use futures::future;
+use futures::future::Either;
+use futures::future::TryFutureExt;
+use futures::stream::Stream;
+use futures::stream::StreamExt;
 use log::debug;
+use process::{Output, Stdio};
 use std::env;
 use std::fs;
 use std::fs::File;
-use std::io;
-use std::io::Read;
-use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
-use std::process;
-use std::process::Command;
-use std::string;
+use std::{
+    io::Read,
+    io::Write,
+    path::Path,
+    path::PathBuf,
+    process, string,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+use tokio::{io, process::Command, time};
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -38,6 +49,11 @@ pub enum RunError {
     ExpectedOutputNotUtf8(string::FromUtf8Error),
     OutputProduced(process::Output),
     ExpectedOutputPathNotUtf8(PathBuf),
+    Timeout {
+        after: Duration,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
 }
 
 #[derive(Debug)]
@@ -64,7 +80,11 @@ pub enum OutDir<P> {
     Persistent(PathBuf),
 }
 
-pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), CompileError> {
+pub async fn compile(
+    suite: &Path,
+    out_dir: &Path,
+    config: &Config<impl AsRef<Path>>,
+) -> Result<(), CompileError> {
     if !out_dir.exists() {
         let _ = fs::create_dir(out_dir);
     } else if !out_dir.is_dir() {
@@ -83,12 +103,13 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Comp
         vec![String::from("Main.elm")]
     };
     let elm_compiler =
-        which::which(&config.elm_compiler).map_err(CompileError::CompilerNotFound)?;
+        which::which(&config.elm_compiler()).map_err(CompileError::CompilerNotFound)?;
     let mut command = Command::new(elm_compiler);
+
     command.current_dir(suite);
     command.arg("make");
     command.args(root_files);
-    command.args(config.args.iter());
+    command.args(config.args().iter());
     command.arg("--output");
     if let Some(elm_home) = env::var_os("ELM_HOME") {
         command.env("ELM_HOME", elm_home);
@@ -114,15 +135,16 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Comp
         command.output().map_err(CompileError::Process)
     };
 
-    let res = (|| {
-        for _ in 0..(config.compiler_reruns.get() - 1) {
-            let op = compile()?;
+    let res = async {
+        for _ in 0..(config.compiler_reruns().get() - 1) {
+            let op = compile().await?;
             if op.status.success() {
                 return Ok(op);
             }
         }
-        compile()
-    })()?;
+        compile().await
+    }
+    .await?;
 
     if !res.status.success() {
         return Err(CompileError::Compiler(res));
@@ -135,12 +157,25 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), Comp
     Ok(())
 }
 
-pub fn run(suite: &Path, out_dir: &Path, config: &Config) -> Result<(), RunError> {
+pub async fn run(
+    suite: &Path,
+    out_dir: &Path,
+    config: &Config<impl AsRef<Path>>,
+) -> Result<(), RunError> {
+    async fn read_to_buf(mut read: impl io::AsyncRead + Unpin) -> io::Result<Vec<u8>> {
+        use io::AsyncReadExt;
+        let mut buffer = Vec::new();
+
+        // read the whole file
+        read.read_to_end(&mut buffer).await?;
+        Ok(buffer)
+    }
+
     if !suite.join("elm.json").exists() {
         return Err(RunError::SuiteDoesNotExist);
     }
     let expected_output_path = suite.join("output.json");
-    let node_exe = which::which(&config.node).map_err(RunError::NodeNotFound)?;
+    let node_exe = which::which(&config.node()).map_err(RunError::NodeNotFound)?;
     let harness_file = out_dir.join("harness.js");
     let main_file = out_dir.join("main.js");
 
@@ -173,17 +208,46 @@ harness(Elm, expectedOutput);
     )
     .map_err(RunError::WritingHarness)?;
 
-    let res = Command::new(node_exe)
+    let mut runner_child = Command::new(node_exe)
         .arg("--unhandled-rejections=strict")
         .arg(&main_file)
-        .output()
+        .stdout(Stdio::piped())
+        .stdin(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(RunError::NodeProcess)?;
 
-    if !res.status.success() {
-        return Err(RunError::Runtime(res));
+    let maybe_timedout =
+        future::select(time::delay_for(config.run_timeout()), &mut runner_child).await;
+
+    let runner_status = match maybe_timedout {
+        Either::Left(((), child)) => {
+            let () = child.kill().map_err(RunError::NodeProcess)?;
+            let stdout = child.stdout.as_mut().unwrap();
+            let stderr = child.stderr.as_mut().unwrap();
+            return Err(RunError::Timeout {
+                after: config.run_timeout(),
+                stdout: read_to_buf(stdout).await.map_err(RunError::NodeProcess)?,
+                stderr: read_to_buf(stderr).await.map_err(RunError::NodeProcess)?,
+            });
+        }
+        Either::Right((status, _)) => status.map_err(RunError::NodeProcess)?,
+    };
+
+    let stdout = &mut runner_child.stdout.unwrap();
+    let stderr = &mut runner_child.stderr.unwrap();
+
+    let output = Output {
+        status: runner_status,
+        stdout: read_to_buf(stdout).await.map_err(RunError::NodeProcess)?,
+        stderr: read_to_buf(stderr).await.map_err(RunError::NodeProcess)?,
+    };
+
+    if !output.status.success() {
+        return Err(RunError::Runtime(output));
     }
-    if !res.stdout.is_empty() {
-        return Err(RunError::OutputProduced(res));
+    if !output.stdout.is_empty() {
+        return Err(RunError::OutputProduced(output));
     }
     let possible_stderr = |mode| {
         format!(
@@ -191,11 +255,11 @@ harness(Elm, expectedOutput);
             mode
         ).into_bytes()
     };
-    if !res.stderr.is_empty()
-        && res.stderr[..] != *possible_stderr("DEV")
-        && res.stderr[..] != *possible_stderr("DEBUG")
+    if !output.stderr.is_empty()
+        && output.stderr[..] != *possible_stderr("DEV")
+        && output.stderr[..] != *possible_stderr("DEBUG")
     {
-        return Err(RunError::OutputProduced(res));
+        return Err(RunError::OutputProduced(output));
     }
 
     Ok(())
@@ -228,7 +292,7 @@ impl<P> OutDir<P> {
     }
 }
 
-pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
+pub async fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     suite: Ps,
     provided_out_dir: Option<Pe>,
     instructions: &super::cli::Instructions,
@@ -242,13 +306,13 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     if !suite.as_ref().join("elm.json").exists() {
         return Err(CompileAndRunError::SuiteNotElm);
     }
-    let failure_allowed = instructions.config.allowed_failures.iter().any(|p| {
-        if p.exists() {
+    let failure_allowed = instructions.config.allowed_failures().iter().any(|p| {
+        if p.as_ref().exists() {
             same_file::is_same_file(&suite, p).unwrap_or_else(|e| {
                 panic!(
                     "Error when comparing the paths {:?} and {:?}: {:?}",
                     suite.as_ref(),
-                    p,
+                    p.as_ref(),
                     e
                 )
             })
@@ -267,21 +331,23 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
         OutDir::Tempory(dir)
     };
 
-    super::suite::compile(suite.as_ref(), out_dir.path(), &instructions.config).map_err(|e| {
-        CompileAndRunError::CompileFailure {
+    super::suite::compile(suite.as_ref(), out_dir.path(), &instructions.config)
+        .await
+        .map_err(|e| CompileAndRunError::CompileFailure {
             allowed: failure_allowed,
             reason: e,
-        }
-    })?;
+        })?;
 
-    super::suite::run(suite.as_ref(), out_dir.path(), &instructions.config).map_err(|e| {
-        out_dir.persist();
-        CompileAndRunError::RunFailure {
-            allowed: failure_allowed,
-            outdir: out_dir,
-            reason: e,
-        }
-    })?;
+    super::suite::run(suite.as_ref(), out_dir.path(), &instructions.config)
+        .await
+        .map_err(|e| {
+            out_dir.persist();
+            CompileAndRunError::RunFailure {
+                allowed: failure_allowed,
+                outdir: out_dir,
+                reason: e,
+            }
+        })?;
 
     // if let Err(CompileAndRunError::Runner(super::suite::RunError::Runtime(_))) = run_result {
     //     out_dir.persist()
@@ -293,17 +359,21 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
         Ok(())
     }
 }
-
+/**/
 pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
-    suites: impl Iterator<Item = Ps> + 'a,
+    suites: impl Stream<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
-) -> impl Iterator<Item = (Ps, Result<(), CompileAndRunError<&Path>>)> + 'a {
-    suites.scan(false, move |prev_run_failed, suite: Ps| {
-        if instructions.fail_fast && *prev_run_failed {
+) -> impl Stream<Item = (Ps, Result<(), CompileAndRunError<&'static Path>>)> + 'a {
+    async fn scanner<'a, P: AsRef<Path>>(
+        prev_run_failed: Arc<AtomicBool>,
+        instructions: &'a super::cli::Instructions,
+        suite: P,
+    ) -> Option<(P, Result<(), CompileAndRunError<&'static Path>>)> {
+        if instructions.fail_fast && prev_run_failed.load(Ordering::Relaxed) {
             None
         } else {
             let res: Result<(), CompileAndRunError<&Path>> =
-                compile_and_run(&suite, None, instructions);
+                compile_and_run(&suite, None, instructions).await;
             if let Err(ref e) = res {
                 println!(
                     "{}",
@@ -323,8 +393,13 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
                 | Ok(_) => false,
                 Err(_) => true,
             };
-            *prev_run_failed = failed;
+            // Never clear `prev_run_failed`, only set it.
+            prev_run_failed.fetch_or(failed, Ordering::Relaxed);
             Some((suite, res))
         }
-    })
+    }
+    suites.scan(
+        Arc::new(AtomicBool::new(false)),
+        move |prev_runs_failed, suite| scanner(prev_runs_failed.clone(), instructions, suite),
+    )
 }
