@@ -27,7 +27,7 @@ pub struct Config<P> {
     ))]
     allowed_failures: Option<Box<[P]>>,
     compiler_reruns: Option<NonZeroI32>,
-    timeout: Option<Duration>,
+    run_timeout: Option<Duration>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -63,7 +63,7 @@ impl Config<RelativePath> {
             args: self.args,
             allowed_failures,
             compiler_reruns: self.compiler_reruns,
-            timeout: self.timeout,
+            run_timeout: self.run_timeout,
         }
     }
 }
@@ -90,7 +90,7 @@ impl<P: AsRef<Path>> Config<P> {
             args: self.args,
             allowed_failures,
             compiler_reruns: self.compiler_reruns,
-            timeout: self.timeout,
+            run_timeout: self.run_timeout,
         }
     }
 
@@ -119,7 +119,7 @@ impl<P: AsRef<Path>> Config<P> {
             .unwrap_or_else(|| NonZeroI32::new(1).unwrap())
     }
 
-    // pub fn timeout(&self) -> Duration {
-    //     self.timeout.unwrap_or_else(|| Duration::new(10, 0))
+    // pub fn run_timeout(&self) -> Duration {
+    //     self.run_timeout.unwrap_or_else(|| Duration::new(10, 0))
     // }
 }
