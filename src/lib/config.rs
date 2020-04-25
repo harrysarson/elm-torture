@@ -30,7 +30,7 @@ pub struct Config<P> {
     run_timeout: Option<Duration>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(transparent)]
 pub struct RelativePath(PathBuf);
 
@@ -51,10 +51,17 @@ impl Config<RelativePath> {
     where
         P: AsRef<Path>,
     {
-        let allowed_failures = self.allowed_failures.as_ref().map(|allowed_failures| {
+        let allowed_failures = self.allowed_failures.map(|allowed_failures| {
             allowed_failures
-                .iter()
-                .map(|file_path| config_file_location.as_ref().join(file_path))
+                .into_vec()
+                .into_iter()
+                .map(|file_path: RelativePath| {
+                    config_file_location
+                        .as_ref()
+                        .parent()
+                        .map(|dirname| dirname.join(&file_path))
+                        .unwrap_or(file_path.0)
+                })
                 .collect()
         });
         Config {
