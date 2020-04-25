@@ -153,8 +153,10 @@ fn run_error<'a>(err: &'a suite::RunError, out_dir: &'a Path) -> impl fmt::Displ
                 stderr,
             } => write!(
                 f,
-                "Running of the suite was stopped after {:?}.{}",
-                after,
+                "Running of the suite was stopped after {}.{}
+
+To inspect the built files that caused this error see: {}",
+                humantime::format_duration(*after),
                 easy_format(|f| {
                     if !stdout.is_empty() || !stderr.is_empty() {
                         write!(
@@ -168,7 +170,8 @@ fn run_error<'a>(err: &'a suite::RunError, out_dir: &'a Path) -> impl fmt::Displ
                     } else {
                         write!(f, "(The process prouduced no output)")
                     }
-                })
+                }),
+                out_dir.display()
             ),
         }
     })
