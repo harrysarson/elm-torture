@@ -1,6 +1,9 @@
 use super::cli;
 use super::config::Config;
 use super::formatting;
+use futures::future::TryFutureExt;
+use futures::stream::Stream;
+use futures::stream::StreamExt;
 use log::debug;
 use std::env;
 use std::fs;
@@ -11,8 +14,14 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
-use std::process::Command;
-use std::string;
+use std::{
+    string,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
+use tokio::process::Command;
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -64,7 +73,7 @@ pub enum OutDir<P> {
     Persistent(PathBuf),
 }
 
-pub fn compile(
+pub async fn compile(
     suite: &Path,
     out_dir: &Path,
     config: &Config<impl AsRef<Path>>,
@@ -89,6 +98,7 @@ pub fn compile(
     let elm_compiler =
         which::which(&config.elm_compiler()).map_err(CompileError::CompilerNotFound)?;
     let mut command = Command::new(elm_compiler);
+
     command.current_dir(suite);
     command.arg("make");
     command.args(root_files);
@@ -118,15 +128,16 @@ pub fn compile(
         command.output().map_err(CompileError::Process)
     };
 
-    let res = (|| {
+    let res = async {
         for _ in 0..(config.compiler_reruns().get() - 1) {
-            let op = compile()?;
+            let op = compile().await?;
             if op.status.success() {
                 return Ok(op);
             }
         }
-        compile()
-    })()?;
+        compile().await
+    }
+    .await?;
 
     if !res.status.success() {
         return Err(CompileError::Compiler(res));
@@ -139,7 +150,7 @@ pub fn compile(
     Ok(())
 }
 
-pub fn run(
+pub async fn run(
     suite: &Path,
     out_dir: &Path,
     config: &Config<impl AsRef<Path>>,
@@ -185,6 +196,7 @@ harness(Elm, expectedOutput);
         .arg("--unhandled-rejections=strict")
         .arg(&main_file)
         .output()
+        .await
         .map_err(RunError::NodeProcess)?;
 
     if !res.status.success() {
@@ -236,7 +248,7 @@ impl<P> OutDir<P> {
     }
 }
 
-pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
+pub async fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     suite: Ps,
     provided_out_dir: Option<Pe>,
     instructions: &super::cli::Instructions,
@@ -275,21 +287,23 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
         OutDir::Tempory(dir)
     };
 
-    super::suite::compile(suite.as_ref(), out_dir.path(), &instructions.config).map_err(|e| {
-        CompileAndRunError::CompileFailure {
+    super::suite::compile(suite.as_ref(), out_dir.path(), &instructions.config)
+        .await
+        .map_err(|e| CompileAndRunError::CompileFailure {
             allowed: failure_allowed,
             reason: e,
-        }
-    })?;
+        })?;
 
-    super::suite::run(suite.as_ref(), out_dir.path(), &instructions.config).map_err(|e| {
-        out_dir.persist();
-        CompileAndRunError::RunFailure {
-            allowed: failure_allowed,
-            outdir: out_dir,
-            reason: e,
-        }
-    })?;
+    super::suite::run(suite.as_ref(), out_dir.path(), &instructions.config)
+        .await
+        .map_err(|e| {
+            out_dir.persist();
+            CompileAndRunError::RunFailure {
+                allowed: failure_allowed,
+                outdir: out_dir,
+                reason: e,
+            }
+        })?;
 
     // if let Err(CompileAndRunError::Runner(super::suite::RunError::Runtime(_))) = run_result {
     //     out_dir.persist()
@@ -301,17 +315,21 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
         Ok(())
     }
 }
-
+/**/
 pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
-    suites: impl Iterator<Item = Ps> + 'a,
+    suites: impl Stream<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
-) -> impl Iterator<Item = (Ps, Result<(), CompileAndRunError<&Path>>)> + 'a {
-    suites.scan(false, move |prev_run_failed, suite: Ps| {
-        if instructions.fail_fast && *prev_run_failed {
+) -> impl Stream<Item = (Ps, Result<(), CompileAndRunError<&'static Path>>)> + 'a {
+    async fn scanner<'a, P: AsRef<Path>>(
+        prev_run_failed: Arc<AtomicBool>,
+        instructions: &'a super::cli::Instructions,
+        suite: P,
+    ) -> Option<(P, Result<(), CompileAndRunError<&'static Path>>)> {
+        if instructions.fail_fast && prev_run_failed.load(Ordering::Relaxed) {
             None
         } else {
             let res: Result<(), CompileAndRunError<&Path>> =
-                compile_and_run(&suite, None, instructions);
+                compile_and_run(&suite, None, instructions).await;
             if let Err(ref e) = res {
                 println!(
                     "{}",
@@ -331,8 +349,13 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
                 | Ok(_) => false,
                 Err(_) => true,
             };
-            *prev_run_failed = failed;
+            // Never clear `prev_run_failed`, only set it.
+            prev_run_failed.fetch_or(failed, Ordering::Relaxed);
             Some((suite, res))
         }
-    })
+    }
+    suites.scan(
+        Arc::new(AtomicBool::new(false)),
+        move |prev_runs_failed, suite| scanner(prev_runs_failed.clone(), instructions, suite),
+    )
 }
