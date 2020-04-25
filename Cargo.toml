@@ -21,3 +21,4 @@ humantime-serde = "1.0.0"
 pathdiff = "0.1.0"
 tokio = { version = "0.2", features = ["full"] }
 futures = "0.3.4"
+humantime = "2.0.0"
