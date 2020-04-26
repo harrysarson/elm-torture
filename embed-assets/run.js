@@ -1,6 +1,9 @@
 
 const assert = require('assert');
 
+// Stub Date.now() for consistant random numbers.
+Date.now = () => 0;
+
 module.exports = function (Elm, output) {
     const { ports = [], flags } = output;
     const app = Elm.Main.init(flags !== undefined ? { flags } : undefined);
