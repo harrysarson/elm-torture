@@ -18,7 +18,7 @@ indented = "0.1.0"
 colored = "1.9"
 replace_with = "0.1.5"
 humantime-serde = "1.0.0"
-pathdiff = "0.1.0"
+pathdiff = "0.2.0"
 tokio = { version = "0.2", features = ["full"] }
 futures = "0.3.4"
 humantime = "2.0.0"
