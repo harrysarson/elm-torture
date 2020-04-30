@@ -192,8 +192,8 @@ pub async fn run(
     write!(
         &File::create(&main_file).map_err(RunError::WritingHarness)?,
         r#"
-const {{ Elm }} = require('./elm.js');
 const harness = require('./harness.js');
+const {{ Elm }} = require('./elm.js');
 const expectedOutput = require('{}');
 
 harness(Elm, expectedOutput);
