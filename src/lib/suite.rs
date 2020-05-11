@@ -222,25 +222,33 @@ harness(generated, expectedOutput);
 
     let runner_status = match maybe_timedout {
         Either::Left(((), child)) => {
-            let () = child.kill().map_err(RunError::NodeProcess)?;
-            let stdout = child.stdout.as_mut().unwrap();
-            let stderr = child.stderr.as_mut().unwrap();
+            child.kill().map_err(RunError::NodeProcess)?;
+            let stdout = read_to_buf(child.stdout.as_mut().unwrap())
+                .await
+                .map_err(RunError::NodeProcess)?;
+            let stderr = read_to_buf(child.stderr.as_mut().unwrap())
+                .await
+                .map_err(RunError::NodeProcess)?;
             return Err(RunError::Timeout {
                 after: config.run_timeout(),
-                stdout: read_to_buf(stdout).await.map_err(RunError::NodeProcess)?,
-                stderr: read_to_buf(stderr).await.map_err(RunError::NodeProcess)?,
+                stdout,
+                stderr,
             });
         }
         Either::Right((status, _)) => status.map_err(RunError::NodeProcess)?,
     };
 
-    let stdout = &mut runner_child.stdout.unwrap();
-    let stderr = &mut runner_child.stderr.unwrap();
+    let stdout = read_to_buf(runner_child.stdout.unwrap())
+        .await
+        .map_err(RunError::NodeProcess)?;
+    let stderr = read_to_buf(runner_child.stderr.unwrap())
+        .await
+        .map_err(RunError::NodeProcess)?;
 
     let output = Output {
         status: runner_status,
-        stdout: read_to_buf(stdout).await.map_err(RunError::NodeProcess)?,
-        stderr: read_to_buf(stderr).await.map_err(RunError::NodeProcess)?,
+        stdout,
+        stderr,
     };
 
     if !output.status.success() {

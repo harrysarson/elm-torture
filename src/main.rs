@@ -1,4 +1,6 @@
 #![warn(clippy::all, clippy::pedantic)]
+// Due to some bug in async desuging we get false positives
+#![allow(clippy::used_underscore_binding)]
 
 mod lib;
 
