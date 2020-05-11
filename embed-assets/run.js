@@ -4,9 +4,13 @@ const assert = require('assert');
 // Stub Date.now() for consistant random numbers.
 Date.now = () => 0;
 
-module.exports = function (Elm, output) {
-    const { ports = [], flags } = output;
-    const app = Elm.Main.init(flags !== undefined ? { flags } : undefined);
+module.exports = function (generated, output) {
+    let actualLogs = ''
+    generated._debugLog = str => {
+        actualLogs += str + '\n';
+    }
+    const { ports = [], flags, logs : expectedLogs = '' } = output;
+    const app = generated.Elm.Main.init(flags !== undefined ? { flags } : undefined);
     let portEventIndex = 0;
 
     function sendIfNextEventSubscription() {
@@ -60,10 +64,15 @@ module.exports = function (Elm, output) {
     sendIfNextEventSubscription();
 
     process.on('exit', () => {
-        assert(
-            portEventIndex == ports.length,
+        assert.strictEqual(
+            portEventIndex, ports.length,
             `There have been ${portEventIndex} port events but should have been exactly ${ports.length} port events.`,
+        );
+        assert.strictEqual(
+            actualLogs, expectedLogs,
+            `Unexpected logs`,
         );
     });
 
 }
+

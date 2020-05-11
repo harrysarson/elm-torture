@@ -193,10 +193,10 @@ pub async fn run(
         &File::create(&main_file).map_err(RunError::WritingHarness)?,
         r#"
 const harness = require('./harness.js');
-const {{ Elm }} = require('./elm.js');
+const generated = require('./elm.js');
 const expectedOutput = require('{}');
 
-harness(Elm, expectedOutput);
+harness(generated, expectedOutput);
 "#,
         match canonical_expected_output_path.to_str() {
             Some(p) => p.replace('\\', "\\\\"),
