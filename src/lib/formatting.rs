@@ -34,7 +34,7 @@ fn process_output<'a>(output: &'a process::Output) -> impl fmt::Display + 'a {
     })
 }
 
-fn process_stdout<'a>(stdout: &'a Vec<u8>) -> impl fmt::Display + 'a {
+fn process_stdout<'a>(stdout: &'a [u8]) -> impl fmt::Display + 'a {
     easy_format(move |f| {
         write!(
             f,
@@ -45,7 +45,7 @@ fn process_stdout<'a>(stdout: &'a Vec<u8>) -> impl fmt::Display + 'a {
     })
 }
 
-fn process_stderr<'a>(stderr: &'a Vec<u8>) -> impl fmt::Display + 'a {
+fn process_stderr<'a>(stderr: &'a [u8]) -> impl fmt::Display + 'a {
     easy_format(move |f| {
         write!(
             f,
