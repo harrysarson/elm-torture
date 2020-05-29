@@ -5,11 +5,15 @@ const assert = require('assert');
 Date.now = () => 0;
 
 module.exports = function (generated, output) {
+    const { ports = [], flags, logs : expectedLogs = '' } = output;
     let actualLogs = ''
     generated._debugLog = str => {
         actualLogs += str + '\n';
+        // If we do not expect logs print them for debugging.
+        if (expectedLogs === '') {
+            console.log(str);
+        }
     }
-    const { ports = [], flags, logs : expectedLogs = '' } = output;
     const app = generated.Elm.Main.init(flags !== undefined ? { flags } : undefined);
     let portEventIndex = 0;
 
