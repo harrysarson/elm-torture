@@ -92,7 +92,7 @@ dependencies = [
  "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "pathdiff 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "replace_with 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "rust-embed 5.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rust-embed 5.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "same-file 1.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.114 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.56 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -533,7 +533,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "rust-embed"
-version = "5.5.1"
+version = "5.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "rust-embed-impl 5.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -879,7 +879,7 @@ dependencies = [
 "checksum regex-syntax 0.6.14 (registry+https://github.com/rust-lang/crates.io-index)" = "b28dfe3fe9badec5dbf0a79a9cccad2cfc2ab5484bdb3e44cbd1ae8b3ba2be06"
 "checksum remove_dir_all 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)" = "4a83fa3702a688b9359eccba92d153ac33fd2e8462f9e0e3fdf155239ea7792e"
 "checksum replace_with 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "e76286384e3eeae2f41cd5622841781b466a5de4a6be5c8756056e843833e7aa"
-"checksum rust-embed 5.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "3a17890cbd0fae97c2006fa1ecec9554946443c319f4dd8cd8d3b92031725161"
+"checksum rust-embed 5.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "213acf1bc5a6dfcd70b62db1e9a7d06325c0e73439c312fcb8599d456d9686ee"
 "checksum rust-embed-impl 5.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "60cacc306d294556771c6e92737ba7e6be0264144bc46dd713a14ef384b0d6b8"
 "checksum rust-embed-utils 5.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "97655158074ccb2d2cfb1ccb4c956ef0f4054e43a2c1e71146d4991e6961e105"
 "checksum ryu 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "bfa8506c1de11c9c4e4c38863ccbe02a305c8188e85a05a784c9e11e1c3910c8"
