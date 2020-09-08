@@ -18,7 +18,12 @@ main =
     Platform.worker
         { init = \() -> ( (), Cmd.none )
         , update = update
-        , subscriptions = \() -> Util.Subs.read Read
+        , subscriptions =
+            \() ->
+                Sub.batch
+                    [ Util.Subs.read Read
+                    , differentRead DifferentRead
+                    ]
         }
 
 
