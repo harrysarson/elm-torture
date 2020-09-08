@@ -1,8 +1,6 @@
 
 const assert = require('assert');
 
-// Stub Date.now() for consistant random numbers.
-Date.now = () => 0;
 
 module.exports = function (generated, output) {
     const { ports = [], flags, logs : expectedLogs = '' } = output;
@@ -14,6 +12,7 @@ module.exports = function (generated, output) {
             console.log(str);
         }
     }
+    generated._randSeed = () => 0;
     const app = generated.Elm.Main.init(flags !== undefined ? { flags } : undefined);
     let portEventIndex = 0;
 
