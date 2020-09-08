@@ -329,15 +329,16 @@ pub async fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
         }
     });
 
-    let mut out_dir = if let Some(dir) = provided_out_dir {
-        OutDir::Provided(dir)
-    } else {
-        let dir = tempfile::Builder::new()
-            .prefix("elm-torture")
-            .tempdir()
-            .expect("Should be able to create a temp_file");
-        OutDir::Tempory(dir)
-    };
+    let mut out_dir = provided_out_dir.map_or_else(
+        || {
+            let dir = tempfile::Builder::new()
+                .prefix("elm-torture")
+                .tempdir()
+                .expect("Should be able to create a temp_file");
+            OutDir::Tempory(dir)
+        },
+        OutDir::Provided,
+    );
 
     super::suite::compile(suite.as_ref(), out_dir.path(), &instructions.config)
         .await
