@@ -128,15 +128,16 @@ fn run_error<'a>(err: &'a suite::RunError, out_dir: &'a Path) -> impl fmt::Displ
                     out_dir.display()
                 )
             }
-            CannotFindExpectedOutput => write!(
+            CannotFindExpectedOutput | CannotReadExpectedOutput => write!(
                 f,
                 "{}",
                 [
-                    "Each suite must contain a file 'output.txt', containing the text that",
-                    "the suite should write to stdout"
+                    "Each suite must contain a file 'output.json', containing the text that",
+                    "the suite should send to and receive from ports"
                 ]
                 .join("\n")
             ),
+            CannotParseExpectedOutput(error) => write!(f, "Error parsing 'output.json': {}", error),
             ExpectedOutputPathNotUtf8(p) => write!(
                 f,
                 "The canonical path to the expected output json file ({}) is not valid utf8",
@@ -172,6 +173,10 @@ To inspect the built files that caused this error see: {}",
                     }
                 }),
                 out_dir.display()
+            ),
+            WritingExpectedOutput(err) => panic!(
+                "Error whilst writing expected output to disk. Details:\n{}",
+                err
             ),
         }
     })

@@ -1,19 +1,18 @@
 use super::cli;
-use super::config::Config;
+use super::config;
 use super::formatting;
 use futures::future;
 use futures::future::Either;
 use futures::future::TryFutureExt;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
+use io::{AsyncReadExt, AsyncWriteExt};
 use log::debug;
 use process::{Output, Stdio};
+use serde::Deserialize;
+use serde::Serialize;
 use std::env;
-use std::fs;
-use std::fs::File;
 use std::{
-    io::Read,
-    io::Write,
     path::Path,
     path::PathBuf,
     process, string,
@@ -23,7 +22,67 @@ use std::{
     },
     time::Duration,
 };
+use tokio::fs;
+use tokio::fs::File;
 use tokio::{io, process::Command, time};
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PortType {
+    Command,
+    Subscription,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PortName(String);
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PortArg(serde_json::Value);
+
+#[serde(rename_all = "kebab-case")]
+#[derive(Debug, Deserialize, Serialize)]
+pub enum StdLibVariant {
+    Official,
+    Another,
+}
+#[serde(rename_all = "kebab-case")]
+#[derive(Debug, Deserialize, Serialize)]
+pub enum OptimisationLevel {
+    Debug,
+    Dev,
+    Optimize,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct SkipIfAll {
+    std_lib_variant: Box<[StdLibVariant]>,
+    optimisation: Box<[OptimisationLevel]>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FilterType {
+    SkipAll,
+    CompileOnly,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Filter {
+    skip: FilterType,
+    if_all_of: SkipIfAll,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct Config {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ports: Option<Box<[(PortType, PortName, PortArg)]>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    logs: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filters: Option<Box<[Filter]>>,
+}
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -46,9 +105,12 @@ pub enum RunError {
     CopyingExpectedOutput(io::Error),
     Runtime(process::Output),
     CannotFindExpectedOutput,
+    CannotReadExpectedOutput,
+    WritingExpectedOutput(io::Error),
     ExpectedOutputNotUtf8(string::FromUtf8Error),
     OutputProduced(process::Output),
     ExpectedOutputPathNotUtf8(PathBuf),
+    CannotParseExpectedOutput(serde_json::Error),
     Timeout {
         after: Duration,
         stdout: Vec<u8>,
@@ -83,8 +145,25 @@ pub enum OutDir<P> {
 pub async fn compile(
     suite: &Path,
     out_dir: &Path,
-    config: &Config<impl AsRef<Path>>,
+    config: &config::Config<impl AsRef<Path>>,
 ) -> Result<(), CompileError> {
+    async fn compile(
+        suite: impl AsRef<Path>,
+        command: &mut Command,
+    ) -> Result<process::Output, CompileError> {
+        fs::remove_dir_all(suite.as_ref().join("elm-stuff"))
+            .await
+            .or_else(|e| {
+                if e.kind() == io::ErrorKind::NotFound {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            })
+            .expect("Could not delete elm-stuff directory");
+        command.output().map_err(CompileError::Process).await
+    };
+
     if !out_dir.exists() {
         let _ = fs::create_dir(out_dir);
     } else if !out_dir.is_dir() {
@@ -93,10 +172,11 @@ pub async fn compile(
     if !suite.join("elm.json").exists() {
         return Err(CompileError::SuiteDoesNotExist);
     }
-    let root_files = if let Ok(mut targets) = File::open(suite.join("targets.txt")) {
+    let root_files = if let Ok(mut targets) = File::open(suite.join("targets.txt")).await {
         let mut contents = String::new();
         targets
             .read_to_string(&mut contents)
+            .await
             .map_err(CompileError::ReadingTargets)?;
         contents.split('\n').map(String::from).collect()
     } else {
@@ -116,33 +196,21 @@ pub async fn compile(
     }
     command.arg(
         fs::canonicalize(out_dir)
+            .await
             .map_err(CompileError::Process)?
             .join("elm.js"),
     );
 
     debug!("Invoking compiler: {:?}", command);
 
-    let mut compile = || {
-        fs::remove_dir_all(suite.join("elm-stuff"))
-            .or_else(|e| {
-                if e.kind() == io::ErrorKind::NotFound {
-                    Ok(())
-                } else {
-                    Err(e)
-                }
-            })
-            .expect("Could not delete elm-stuff directory");
-        command.output().map_err(CompileError::Process)
-    };
-
     let res = async {
         for _ in 0..(config.compiler_reruns().get() - 1) {
-            let op = compile().await?;
+            let op = compile(&suite, &mut command).await?;
             if op.status.success() {
                 return Ok(op);
             }
         }
-        compile().await
+        compile(&suite, &mut command).await
     }
     .await?;
 
@@ -157,13 +225,13 @@ pub async fn compile(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn run(
     suite: &Path,
     out_dir: &Path,
-    config: &Config<impl AsRef<Path>>,
+    config: &config::Config<impl AsRef<Path>>,
 ) -> Result<(), RunError> {
     async fn read_to_buf(mut read: impl io::AsyncRead + Unpin) -> io::Result<Vec<u8>> {
-        use io::AsyncReadExt;
         let mut buffer = Vec::new();
 
         // read the whole file
@@ -177,36 +245,43 @@ pub async fn run(
     let expected_output_path = suite.join("output.json");
     let node_exe = which::which(&config.node()).map_err(RunError::NodeNotFound)?;
     let harness_file = out_dir.join("harness.js");
+    let output_file = out_dir.join("output.json");
     let main_file = out_dir.join("main.js");
 
-    let canonical_expected_output_path = expected_output_path
-        .canonicalize()
-        .map_err(|_| RunError::CannotFindExpectedOutput)?;
+    let output: Config = serde_json::from_slice(
+        &fs::read(expected_output_path)
+            .await
+            .map_err(|_| RunError::CannotReadExpectedOutput)?,
+    )
+    .map_err(RunError::CannotParseExpectedOutput)?;
 
     fs::write(
         &harness_file,
         &include_bytes!("../../embed-assets/run.js")[..],
     )
+    .await
     .map_err(RunError::WritingHarness)?;
+    fs::write(
+        &output_file,
+        &serde_json::to_vec_pretty(&output).expect("Failed to reserialize output json"),
+    )
+    .await
+    .map_err(RunError::WritingExpectedOutput)?;
 
-    write!(
-        &File::create(&main_file).map_err(RunError::WritingHarness)?,
-        r#"
+    File::create(&main_file)
+        .await
+        .map_err(RunError::WritingHarness)?
+        .write_all(
+            br#"
 const harness = require('./harness.js');
 const generated = require('./elm.js');
-const expectedOutput = require('{}');
+const expectedOutput = require('./output.json');
 
 harness(generated, expectedOutput);
 "#,
-        match canonical_expected_output_path.to_str() {
-            Some(p) => p.replace('\\', "\\\\"),
-            None =>
-                return Err(RunError::ExpectedOutputPathNotUtf8(
-                    canonical_expected_output_path
-                )),
-        }
-    )
-    .map_err(RunError::WritingHarness)?;
+        )
+        .await
+        .map_err(RunError::WritingHarness)?;
 
     let mut runner_child = Command::new(node_exe)
         .arg("--unhandled-rejections=strict")
