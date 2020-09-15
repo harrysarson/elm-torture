@@ -17,7 +17,7 @@ tempfile = "3.1.0"
 indented = "0.1.0"
 colored = "2.0"
 replace_with = "0.1.6"
-humantime-serde = "1.0.0"
+humantime-serde = "1.0.1"
 pathdiff = "0.2.0"
 tokio = { version = "0.2", features = ["full"] }
 futures = "0.3.5"
