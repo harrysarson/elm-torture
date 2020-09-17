@@ -1,5 +1,4 @@
 use crate::lib::config;
-use crate::lib::config::Config;
 use clap::Clap;
 use std::fs::File;
 use std::path::PathBuf;
@@ -12,9 +11,11 @@ use std::path::PathBuf;
     group=clap::ArgGroup::new("suite_or_suites").required(true)
 )]
 struct Opts {
-    /// Sets a custom config file. Could have been an Option<T> with no default too
-    #[clap(short, long, about = "Set config file")]
-    config: Option<PathBuf>,
+    #[clap(short, long = "config", about = "Set config file")]
+    config_path: Option<PathBuf>,
+
+    #[clap(flatten)]
+    config: config::Config,
 
     #[clap(
         long,
@@ -39,8 +40,10 @@ struct Opts {
         about = "The directory to place built files in."
     )]
     out_dir: Option<PathBuf>,
+
     #[clap(long, value_name = "FILE", about = "Dump the configuration to FILE.")]
     show_config: Option<PathBuf>,
+
     #[clap(long, about = "Stop running on the first failed suite.")]
     fail_fast: bool,
 }
@@ -55,7 +58,7 @@ pub enum Task {
 }
 
 pub struct Instructions {
-    pub config: config::Config<PathBuf>,
+    pub config: config::Config,
     pub fail_fast: bool,
     pub task: Task,
 }
@@ -65,20 +68,34 @@ pub fn get_cli_task() -> Instructions {
         suite,
         suites,
         out_dir,
-        config,
+        config_path,
         fail_fast,
         show_config,
+        config: config_from_cli,
+        ..
     } = Opts::parse();
 
-    let config: Config<PathBuf> = {
-        config
-            .map(|p| {
-                let file = File::open(&p).expect("config file not found");
-                let config: config::Config<config::RelativePath> = serde_json::from_reader(file)
-                    .expect("error while reading json configuration file");
-                config.into_config(p)
-            })
-            .unwrap_or_default()
+    let config = {
+        if let Some(config_from_file) = config_path.map(|p| -> config::Config {
+            let file = File::open(&p).expect("config file not found");
+            serde_json::from_reader(file).expect("error while reading json configuration file")
+        }) {
+            macro_rules! merge {
+                ($prop:ident) => {
+                    config_from_cli.$prop.or(config_from_file.$prop)
+                };
+            }
+
+            config::Config {
+                elm_compiler: merge!(elm_compiler),
+                node: merge!(node),
+                opt_level: merge!(opt_level),
+                compiler_reruns: merge!(compiler_reruns),
+                run_timeout: merge!(run_timeout),
+            }
+        } else {
+            config_from_cli
+        }
     };
 
     Instructions {

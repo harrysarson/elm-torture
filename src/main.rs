@@ -21,7 +21,11 @@ fn get_exit_code<P>(suite_result: &Result<(), CompileAndRunError<P>>) -> i32 {
 
     match suite_result {
         Err(ref compile_and_run_error) => match compile_and_run_error {
-            SuiteNotExist | SuiteNotDir | SuiteNotElm => 0x28,
+            CannotDetectStdlibVariant(_)
+            | SuiteNotExist
+            | SuiteNotDir
+            | SuiteNotElm
+            | CannotGetSuiteConfig(_) => 0x28,
 
             CompileFailure { allowed, .. } => {
                 if *allowed {
@@ -38,8 +42,7 @@ fn get_exit_code<P>(suite_result: &Result<(), CompileAndRunError<P>>) -> i32 {
                     0x22
                 }
             }
-
-            ExpectedFailure => 0x24,
+            ExpectedCompileFailure | ExpectedRunFailure => 0x24,
         },
         Ok(()) => 0,
     }
@@ -50,7 +53,7 @@ async fn run_app(instructions: cli::Instructions) -> Option<NonZeroI32> {
     match &instructions.task {
         cli::Task::DumpConfig(config_file) => {
             let file = fs::File::create(config_file).expect("could create config file");
-            serde_json::to_writer_pretty(file, &instructions.config.serialize(config_file))
+            serde_json::to_writer_pretty(file, &instructions.config.serialize())
                 .expect("could not serialize config");
             None
         }
@@ -120,8 +123,11 @@ elm-torture has run the following {} SSCCE{}:
                                         allowed: true,
                                         ..
                                     }) => "allowed compile failure".yellow(),
-                                    Err(CompileAndRunError::ExpectedFailure) =>
-                                        "success when failure expected".red(),
+                                    Err(CompileAndRunError::ExpectedCompileFailure) =>
+                                        "success when elm-torture expected a compile time failure"
+                                            .red(),
+                                    Err(CompileAndRunError::ExpectedRunFailure) =>
+                                        "success when elm-torture expected a run time failure".red(),
                                     Err(_) => "failure".red(),
                                     Ok(_) => "success".green(),
                                 }

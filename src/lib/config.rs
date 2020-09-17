@@ -1,9 +1,10 @@
+use clap::Clap;
 use serde::{Deserialize, Serialize};
-use std::num::NonZeroI32;
-use std::path::Path;
 use std::path::PathBuf;
 use std::string::String;
 use std::time::Duration;
+use std::{fmt, num::NonZeroI32};
+use std::{path::Path, str::FromStr};
 
 // fn xxx() -> {
 
@@ -16,18 +17,40 @@ use std::time::Duration;
 //     }
 // }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct Config<P> {
-    elm_compiler: Option<String>,
-    node: Option<String>,
-    args: Option<Box<[String]>>,
-    #[serde(bound(
-        serialize = "P: AsRef<RelativePath> + Serialize",
-        deserialize = "P: AsRef<RelativePath> + Deserialize<'de>"
-    ))]
-    allowed_failures: Option<Box<[P]>>,
-    compiler_reruns: Option<NonZeroI32>,
-    run_timeout: Option<Duration>,
+#[derive(Debug, Deserialize, Serialize, Clap, PartialEq, Eq, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+pub enum OptimisationLevel {
+    Debug,
+    Dev,
+    Optimize,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, Clap)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    #[clap(long, about = "Path to elm compiler.")]
+    pub elm_compiler: Option<String>,
+    #[clap(long, about = "Path to node.")]
+    pub node: Option<String>,
+    #[clap(
+        short,
+        long,
+        about = "Optimization level to use when compiling SSCCEs."
+    )]
+    pub opt_level: Option<OptimisationLevel>,
+    #[clap(
+        long,
+        value_name = "N",
+        about = "Retry compilation (compile at most <N> times) if it fails."
+    )]
+    pub compiler_reruns: Option<NonZeroI32>,
+    #[clap(
+        long,
+        value_name = "DURATION",
+        about = "Report run time failure if SSCCE takes more than <DURATION> to run.",
+        parse(try_from_str = humantime::parse_duration)
+    )]
+    pub run_timeout: Option<Duration>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -46,56 +69,41 @@ impl AsRef<RelativePath> for RelativePath {
     }
 }
 
-impl Config<RelativePath> {
-    pub fn into_config<P>(self, config_file_location: P) -> Config<PathBuf>
-    where
-        P: AsRef<Path>,
-    {
-        let allowed_failures = self.allowed_failures.map(|allowed_failures| {
-            allowed_failures
-                .into_vec()
-                .into_iter()
-                .map(|file_path: RelativePath| {
-                    config_file_location
-                        .as_ref()
-                        .parent()
-                        .map(|dirname| dirname.join(&file_path))
-                        .unwrap_or(file_path.0)
-                })
-                .collect()
-        });
-        Config {
-            elm_compiler: self.elm_compiler,
-            node: self.node,
-            args: self.args,
-            allowed_failures,
-            compiler_reruns: self.compiler_reruns,
-            run_timeout: self.run_timeout,
-        }
-    }
-}
+// impl Config<RelativePath> {
+//     pub fn into_config<P>(self, config_file_location: P) -> Config<PathBuf>
+//     where
+//         P: AsRef<Path>,
+//     {
+//         let allowed_failures = self.allowed_failures.map(|allowed_failures| {
+//             allowed_failures
+//                 .into_vec()
+//                 .into_iter()
+//                 .map(|file_path: RelativePath| {
+//                     config_file_location
+//                         .as_ref()
+//                         .parent()
+//                         .map(|dirname| dirname.join(&file_path))
+//                         .unwrap_or(file_path.0)
+//                 })
+//                 .collect()
+//         });
+//         Config {
+//             elm_compiler: self.elm_compiler,
+//             node: self.node,
+//             args: self.args,
+//             allowed_failures,
+//             compiler_reruns: self.compiler_reruns,
+//             run_timeout: self.run_timeout,
+//         }
+//     }
+// }
 
-impl<P: AsRef<Path>> Config<P> {
-    pub fn serialize<P2: AsRef<Path>>(self, file_location: P2) -> impl Serialize {
-        let allowed_failures = self.allowed_failures.as_ref().map(|allowed_failures| {
-            allowed_failures
-                .iter()
-                .map(|file_path| {
-                    RelativePath(
-                        pathdiff::diff_paths(
-                            file_path.as_ref(),
-                            &file_location.as_ref().to_path_buf(),
-                        )
-                        .expect("Able to diff paths"),
-                    )
-                })
-                .collect()
-        });
+impl Config {
+    pub fn serialize(self) -> impl Serialize {
         Config {
             elm_compiler: self.elm_compiler,
             node: self.node,
-            args: self.args,
-            allowed_failures,
+            opt_level: self.opt_level,
             compiler_reruns: self.compiler_reruns,
             run_timeout: self.run_timeout,
         }
@@ -111,14 +119,16 @@ impl<P: AsRef<Path>> Config<P> {
         self.node.as_ref().map_or_else(|| "node", String::as_str)
     }
 
-    pub fn args(&self) -> &[String] {
-        self.args.as_ref().map_or_else(|| &[][..], |x| &x[..])
+    pub fn opt_level(&self) -> OptimisationLevel {
+        self.opt_level.unwrap_or(OptimisationLevel::Dev)
     }
 
-    pub fn allowed_failures(&self) -> &[impl AsRef<Path>] {
-        self.allowed_failures
-            .as_ref()
-            .map_or_else(|| &[][..], |x| &x[..])
+    pub fn args(&self) -> &[&'static str] {
+        match self.opt_level() {
+            OptimisationLevel::Debug => &["--debug"],
+            OptimisationLevel::Dev => &[],
+            OptimisationLevel::Optimize => &["--optimize"],
+        }
     }
 
     pub fn compiler_reruns(&self) -> NonZeroI32 {
@@ -128,5 +138,27 @@ impl<P: AsRef<Path>> Config<P> {
 
     pub fn run_timeout(&self) -> Duration {
         self.run_timeout.unwrap_or_else(|| Duration::new(10, 0))
+    }
+}
+
+#[derive(Debug)]
+pub struct InvalidOptimizationLevel(String);
+
+impl FromStr for OptimisationLevel {
+    type Err = InvalidOptimizationLevel;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "debug" => Self::Debug,
+            "dev" => Self::Dev,
+            "optimize" => Self::Optimize,
+            _ => return Err(InvalidOptimizationLevel(s.to_string())),
+        })
+    }
+}
+
+impl fmt::Display for InvalidOptimizationLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Invalid optimisation level: {}", self.0)
     }
 }
