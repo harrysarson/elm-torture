@@ -30,13 +30,13 @@ type AnyOneOf<T> = Option<Box<[T]>>;
 
 trait AnyOneOfExt {
     type Item;
-    fn any(&self, default: bool, f: impl FnMut(&Self::Item) -> bool) -> bool;
+    fn any(&self, f: impl FnMut(&Self::Item) -> bool) -> bool;
 }
 
 impl<T> AnyOneOfExt for AnyOneOf<T> {
     type Item = T;
-    fn any(&self, default: bool, f: impl FnMut(&Self::Item) -> bool) -> bool {
-        self.as_ref().map_or_else(|| default, |s| s.iter().any(f))
+    fn any(&self, f: impl FnMut(&Self::Item) -> bool) -> bool {
+        self.as_ref().map_or_else(|| true, |s| s.iter().any(f))
     }
 }
 
@@ -118,10 +118,10 @@ struct RunFailsIfAllFacts {
 impl Condition for RunFailsIfAll {
     type Facts = RunFailsIfAllFacts;
     fn is_met(&self, f: &Self::Facts) -> bool {
-        self.opt_level.any(true, |level| *level == f.opt_level)
+        self.opt_level.any(|level| *level == f.opt_level)
             && self
                 .stdlib_variant
-                .any(true, |variant| *variant == f.stdlib_variant)
+                .any(|variant| *variant == f.stdlib_variant)
     }
 }
 struct CompileFailsIfAllFacts {
@@ -131,7 +131,7 @@ struct CompileFailsIfAllFacts {
 impl Condition for CompileFailsIfAll {
     type Facts = CompileFailsIfAllFacts;
     fn is_met(&self, f: &Self::Facts) -> bool {
-        self.opt_level.any(true, |level| *level == f.opt_level)
+        self.opt_level.any(|level| *level == f.opt_level)
     }
 }
 
