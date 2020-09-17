@@ -1,6 +1,6 @@
 #![warn(clippy::all, clippy::pedantic)]
-// Due to some bug in async desuging we get false positives
-#![allow(clippy::used_underscore_binding)]
+// https://github.com/rust-lang/rust-clippy/issues/5822
+#![allow(clippy::option_if_let_else)]
 
 mod lib;
 

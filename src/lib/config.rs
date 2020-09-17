@@ -29,28 +29,28 @@ pub enum OptimisationLevel {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[clap(long, about = "Path to elm compiler.")]
-    pub elm_compiler: Option<String>,
+    elm_compiler: Option<String>,
     #[clap(long, about = "Path to node.")]
-    pub node: Option<String>,
+    node: Option<String>,
     #[clap(
         short,
         long,
         about = "Optimization level to use when compiling SSCCEs."
     )]
-    pub opt_level: Option<OptimisationLevel>,
+    opt_level: Option<OptimisationLevel>,
     #[clap(
         long,
         value_name = "N",
         about = "Retry compilation (compile at most <N> times) if it fails."
     )]
-    pub compiler_reruns: Option<NonZeroI32>,
+    compiler_reruns: Option<NonZeroI32>,
     #[clap(
         long,
         value_name = "DURATION",
         about = "Report run time failure if SSCCE takes more than <DURATION> to run.",
         parse(try_from_str = humantime::parse_duration)
     )]
-    pub run_timeout: Option<Duration>,
+    run_timeout: Option<Duration>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -69,35 +69,6 @@ impl AsRef<RelativePath> for RelativePath {
     }
 }
 
-// impl Config<RelativePath> {
-//     pub fn into_config<P>(self, config_file_location: P) -> Config<PathBuf>
-//     where
-//         P: AsRef<Path>,
-//     {
-//         let allowed_failures = self.allowed_failures.map(|allowed_failures| {
-//             allowed_failures
-//                 .into_vec()
-//                 .into_iter()
-//                 .map(|file_path: RelativePath| {
-//                     config_file_location
-//                         .as_ref()
-//                         .parent()
-//                         .map(|dirname| dirname.join(&file_path))
-//                         .unwrap_or(file_path.0)
-//                 })
-//                 .collect()
-//         });
-//         Config {
-//             elm_compiler: self.elm_compiler,
-//             node: self.node,
-//             args: self.args,
-//             allowed_failures,
-//             compiler_reruns: self.compiler_reruns,
-//             run_timeout: self.run_timeout,
-//         }
-//     }
-// }
-
 impl Config {
     pub fn serialize(self) -> impl Serialize {
         Config {
@@ -106,6 +77,22 @@ impl Config {
             opt_level: self.opt_level,
             compiler_reruns: self.compiler_reruns,
             run_timeout: self.run_timeout,
+        }
+    }
+
+    pub fn overwrite_with(self, other: Config) -> Config {
+        macro_rules! merge {
+            ($prop:ident) => {
+                other.$prop.or(self.$prop)
+            };
+        }
+
+        Config {
+            elm_compiler: merge!(elm_compiler),
+            node: merge!(node),
+            opt_level: merge!(opt_level),
+            compiler_reruns: merge!(compiler_reruns),
+            run_timeout: merge!(run_timeout),
         }
     }
 
