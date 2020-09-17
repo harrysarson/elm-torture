@@ -3,6 +3,7 @@
 use super::find_suites;
 use super::suite;
 use super::suite::CompileAndRunError;
+use super::suite::GetSuiteConfigError;
 use std::fmt;
 use std::path::Path;
 use std::process;
@@ -128,21 +129,7 @@ fn run_error<'a>(err: &'a suite::RunError, out_dir: &'a Path) -> impl fmt::Displ
                     out_dir.display()
                 )
             }
-            CannotFindExpectedOutput | CannotReadExpectedOutput => write!(
-                f,
-                "{}",
-                [
-                    "Each suite must contain a file 'output.json', containing the text that",
-                    "the suite should send to and receive from ports"
-                ]
-                .join("\n")
-            ),
-            CannotParseExpectedOutput(error) => write!(f, "Error parsing 'output.json': {}", error),
-            ExpectedOutputPathNotUtf8(p) => write!(
-                f,
-                "The canonical path to the expected output json file ({}) is not valid utf8",
-                p.display()
-            ),
+
             OutputProduced(output) => write!(
                 f,
                 "The suite ran without error but produced the following output!:\n{}",
@@ -189,6 +176,7 @@ pub fn compile_and_run_error<'a, Pe: AsRef<Path>, Pp: AsRef<Path> + 'a, Ps: AsRe
 ) -> impl fmt::Display + 'a {
     easy_format(move |f| {
         use CompileAndRunError::*;
+        use GetSuiteConfigError::*;
 
         match err {
             SuiteNotExist => write!(
@@ -207,6 +195,23 @@ pub fn compile_and_run_error<'a, Pe: AsRef<Path>, Pp: AsRef<Path> + 'a, Ps: AsRe
                 f,
                 "The suite directory: \"{}\" is not an Elm application or package",
                 suite.as_ref().display()
+            ),
+
+            CannotGetSuiteConfig(CannotRead(e)) => write!(
+                f,
+                "{} {}",
+                [
+                    "Each suite must contain a file 'output.json', containing the text that",
+                    "the suite should send to and receive from ports. When elm-torture tried",
+                    "to read the file it got an error:"
+                ]
+                .join("\n"),
+                e
+            ),
+            CannotGetSuiteConfig(Parse(error)) => write!(
+                f,
+                "Error parsing 'output.json' as a json file containing the suite config: {}",
+                error
             ),
 
             CompileFailure { allowed, reason } => {
@@ -241,11 +246,20 @@ pub fn compile_and_run_error<'a, Pe: AsRef<Path>, Pp: AsRef<Path> + 'a, Ps: AsRe
                 }
             }
 
-            ExpectedFailure => write!(
+            ExpectedCompileFailure => write!(
                 f,
-                "Suite {} was expected to fail but did not!",
+                "elm-torture expected a failure when compiling suite {}",
                 &suite.as_ref().display(),
             ),
+            ExpectedRunFailure => write!(
+                f,
+                "elm-torture expected a failure when running suite {}",
+                &suite.as_ref().display(),
+            ),
+
+            CannotDetectStdlibVariant(e) => {
+                panic!("Failed to detect stdlib variant due to error: {:?}", e)
+            }
         }
     })
 }

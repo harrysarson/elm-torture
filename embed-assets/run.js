@@ -12,6 +12,9 @@ module.exports = function (generated, output) {
             console.log(str);
         }
     }
+    if (!Object.prototype.hasOwnProperty.call(generated, '_another_elm')) {
+        Date.now = () => 0;
+    }
     generated._randSeed = () => 0;
     const app = generated.Elm.Main.init(flags !== undefined ? { flags } : undefined);
     let portEventIndex = 0;

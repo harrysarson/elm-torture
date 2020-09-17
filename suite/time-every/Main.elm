@@ -1,6 +1,5 @@
 module Main exposing (main)
 
-
 import Platform
 import Time
 import Util.Cmds
@@ -11,10 +10,12 @@ type Msg
     | Time1
     | Time2
 
+
 type Model
     = One
     | Two
     | Three
+
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -34,22 +35,28 @@ update msg model =
             , Util.Cmds.write "2"
             )
 
+
 subscriptions : Model -> Sub Msg
 subscriptions model =
     case model of
         -- Get app in sync with 300ms intervals
-    One ->    Time.every 300 (\_ -> Init)
-    Two -> Sub.batch
-            [ Time.every 30 (\_ -> Time1)
-            , Time.every 100 (\_ -> Time2)
-            ]
-    Three ->
-        Sub.none
+        One ->
+            Time.every 300 (\_ -> Init)
+
+        Two ->
+            Sub.batch
+                [ Time.every 30 (\_ -> Time1)
+                , Time.every 100 (\_ -> Time2)
+                ]
+
+        Three ->
+            Sub.none
+
 
 main : Platform.Program () Model Msg
 main =
     Platform.worker
-        { init = \() -> (One, Cmd.none)
+        { init = \() -> ( One, Cmd.none )
         , update = update
         , subscriptions = subscriptions
         }

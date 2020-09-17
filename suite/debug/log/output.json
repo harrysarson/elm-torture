@@ -1,4 +1,14 @@
 {
     "ports": [],
-    "logs": "hello: World\n"
+    "logs": "hello: World\n",
+    "run-fails-if": {
+        "stdlib-variant": [
+            "official"
+        ]
+    },
+    "compile-fails-if": {
+        "opt-level": [
+            "optimize"
+        ]
+    }
 }

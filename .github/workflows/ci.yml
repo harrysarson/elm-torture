@@ -80,10 +80,10 @@ jobs:
           command: build
 
       - name: Basic torture run
-        run: make run-basic
+        run: cargo run -- --suites suite --config config.json
 
       - name: Debug torture run
-        run: make run-debug
+        run: cargo run -- --suites suite --config config.json --opt-level debug
 
       - name: Optimized torture run
-        run: make run-optimize
+        run: cargo run -- --suites suite --config config.json --opt-level optimize
