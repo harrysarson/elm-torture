@@ -80,19 +80,7 @@ pub fn get_cli_task() -> Instructions {
             let file = File::open(&p).expect("config file not found");
             serde_json::from_reader(file).expect("error while reading json configuration file")
         }) {
-            macro_rules! merge {
-                ($prop:ident) => {
-                    config_from_cli.$prop.or(config_from_file.$prop)
-                };
-            }
-
-            config::Config {
-                elm_compiler: merge!(elm_compiler),
-                node: merge!(node),
-                opt_level: merge!(opt_level),
-                compiler_reruns: merge!(compiler_reruns),
-                run_timeout: merge!(run_timeout),
-            }
+            config_from_file.overwrite_with(config_from_cli)
         } else {
             config_from_cli
         }
