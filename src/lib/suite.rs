@@ -6,16 +6,15 @@ use futures::future::Either;
 use futures::future::TryFutureExt;
 use futures::stream::Stream;
 use futures::stream::StreamExt;
-use io::{AsyncReadExt, AsyncWriteExt};
 use log::debug;
-use process::{Output, Stdio};
 use serde::Deserialize;
 use serde::Serialize;
+use std::process::{Output, Stdio};
 use std::{env, ffi::OsStr};
 use std::{
     path::Path,
     path::PathBuf,
-    process, string,
+    string,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -24,6 +23,7 @@ use std::{
 };
 use tokio::fs;
 use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::{io, process::Command, time};
 
 type AnyOneOf<T> = Option<Box<[T]>>;
@@ -152,9 +152,10 @@ pub struct Config {
 pub enum CompileError {
     CompilerNotFound(which::Error),
     Process(io::Error),
-    Compiler(process::Output),
-    CompilerStdErrNotEmpty(process::Output),
+    Compiler(Output),
+    CompilerStdErrNotEmpty(Output),
     ReadingTargets(io::Error),
+    DeletingElmStuff(io::Error),
     SuiteDoesNotExist,
     OutDirIsNotDir,
 }
@@ -178,10 +179,10 @@ pub enum RunError {
     NodeProcess(io::Error),
     WritingHarness(io::Error),
     CopyingExpectedOutput(io::Error),
-    Runtime(process::Output),
+    Runtime(Output),
     WritingExpectedOutput(io::Error),
     ExpectedOutputNotUtf8(string::FromUtf8Error),
-    OutputProduced(process::Output),
+    OutputProduced(Output),
     Timeout {
         after: Duration,
         stdout: Vec<u8>,
@@ -224,7 +225,7 @@ pub async fn compile(
     async fn compile(
         suite: impl AsRef<Path>,
         command: &mut Command,
-    ) -> Result<process::Output, CompileError> {
+    ) -> Result<Output, CompileError> {
         fs::remove_dir_all(suite.as_ref().join("elm-stuff"))
             .await
             .or_else(|e| {
@@ -234,7 +235,7 @@ pub async fn compile(
                     Err(e)
                 }
             })
-            .expect("Could not delete elm-stuff directory");
+            .map_err(CompileError::DeletingElmStuff)?;
         command.output().map_err(CompileError::Process).await
     };
 

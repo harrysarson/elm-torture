@@ -1,7 +1,7 @@
 use crate::lib::config;
 use clap::Clap;
-use std::fs::File;
-use std::path::PathBuf;
+use std::{ffi::OsStr, path::PathBuf};
+use std::{fs::File, path::Path};
 
 #[derive(Clap)]
 #[clap(
@@ -11,8 +11,8 @@ use std::path::PathBuf;
     group=clap::ArgGroup::new("suite_or_suites").required(true)
 )]
 struct Opts {
-    #[clap(short, long = "config", about = "Set config file")]
-    config_path: Option<PathBuf>,
+    #[clap(short, long = "config", about = "Set config file", parse(try_from_os_str = read_config_file))]
+    config_from_file: Option<config::Config>,
 
     #[clap(flatten)]
     config: config::Config,
@@ -63,27 +63,39 @@ pub struct Instructions {
     pub task: Task,
 }
 
+fn read_config_file(config_path: &OsStr) -> Result<config::Config, String> {
+    let file = File::open(config_path).map_err(|e| {
+        format!(
+            "Config file {} not found: {}",
+            AsRef::<Path>::as_ref(config_path).to_string_lossy(),
+            e
+        )
+    })?;
+    serde_json::from_reader(file).map_err(|e| {
+        format!(
+            "Could not parse file {} as json config: {}",
+            AsRef::<Path>::as_ref(config_path).to_string_lossy(),
+            e
+        )
+    })
+}
+
 pub fn get_cli_task() -> Instructions {
     let Opts {
         suite,
         suites,
         out_dir,
-        config_path,
+        config_from_file,
         fail_fast,
         show_config,
         config: config_from_cli,
         ..
     } = Opts::parse();
 
-    let config = {
-        if let Some(config_from_file) = config_path.map(|p| -> config::Config {
-            let file = File::open(&p).expect("config file not found");
-            serde_json::from_reader(file).expect("error while reading json configuration file")
-        }) {
-            config_from_file.overwrite_with(config_from_cli)
-        } else {
-            config_from_cli
-        }
+    let config = if let Some(c) = config_from_file {
+        c.overwrite_with(config_from_cli)
+    } else {
+        config_from_cli
     };
 
     Instructions {

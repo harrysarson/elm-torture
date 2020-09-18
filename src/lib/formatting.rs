@@ -83,6 +83,7 @@ fn compiler_error<'a, P1: AsRef<Path> + 'a, P2: AsRef<Path> + 'a>(
             SuiteDoesNotExist => {
                 panic!("Path was not suite - this should have been checked already!")
             }
+            DeletingElmStuff(e) => panic!("Could not delete elm-stuff directory! Details: {}", e),
 
             OutDirIsNotDir => {
                 if let Some(dir) = out_dir.as_ref() {
