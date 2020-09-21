@@ -1,9 +1,9 @@
 use clap::Clap;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::str::FromStr;
 use std::string::String;
 use std::time::Duration;
+use std::{fmt, path::PathBuf};
 
 #[derive(Debug, Deserialize, Serialize, Clap, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
@@ -39,6 +39,13 @@ pub struct Config {
         parse(try_from_str = humantime::parse_duration)
     )]
     run_timeout: Option<Duration>,
+
+    #[clap(
+        long,
+        value_name = "DIRECTORY",
+        about = "The directory to place built files in."
+    )]
+    pub out_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -59,6 +66,7 @@ impl Config {
             opt_level: merge!(opt_level),
             compiler_max_retries: merge!(compiler_max_retries),
             run_timeout: merge!(run_timeout),
+            out_dir: merge!(out_dir),
         }
     }
 

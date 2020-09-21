@@ -4,11 +4,11 @@
 
 mod lib;
 use colored::Colorize;
-use lib::cli;
 use lib::formatting;
 use lib::suite::compile_and_run;
 use lib::suite::compile_and_run_suites;
 use lib::suite::CompileAndRunError;
+use lib::{cli, suite::OutDir};
 use rayon::prelude::*;
 use std::sync::Mutex;
 use std::{fs, process};
@@ -17,7 +17,7 @@ use std::{num::NonZeroI32, path::Path};
 const WELCOME_MESSAGE: &str = "Elm Torture - stress tests for an elm compiler";
 
 #[allow(clippy::enum_glob_use)]
-fn get_exit_code<P>(suite_result: &Result<(), CompileAndRunError<P>>) -> i32 {
+fn get_exit_code(suite_result: &Result<(), CompileAndRunError>) -> i32 {
     use CompileAndRunError::*;
 
     match suite_result {
@@ -74,7 +74,7 @@ Running the following {} SSCCE{}:
     let printer = Mutex::new(formatting::PrinterQueue::new());
     let suite_results: Vec<_> = compile_and_run_suites(suites.par_iter(), instructions)
         .into_par_iter()
-        .inspect(|(suite, res)| {
+        .inspect(|(suite, out_dir, res)| {
             let index = suites
                 .iter()
                 .position(|some_suite| some_suite.as_ref() == suite.as_ref())
@@ -87,12 +87,8 @@ Running the following {} SSCCE{}:
                         indented::indented(formatting::compile_and_run_error(
                             e,
                             suite,
-                            match instructions.task {
-                                cli::Task::RunSuite { ref out_dir, .. } => {
-                                    out_dir.as_ref()
-                                }
-                                _ => None,
-                            },
+                            out_dir,
+                            instructions.config.out_dir.as_ref(),
                         ))
                     ),
                 );
@@ -110,7 +106,7 @@ elm-torture has run the following {} SSCCE{}:
         suites.len(),
         if suites.len() == 1 { "" } else { "s" },
         indented::indented(formatting::easy_format(|f| {
-            for (suite, result) in &suite_results {
+            for (suite, _, result) in &suite_results {
                 writeln!(
                     f,
                     "{} ({})",
@@ -134,7 +130,7 @@ elm-torture has run the following {} SSCCE{}:
     );
     let code = suite_results
         .iter()
-        .fold(0, |code, (_, res)| code | get_exit_code(res));
+        .fold(0, |code, (_, _, res)| code | get_exit_code(res));
     NonZeroI32::new(code)
 }
 
@@ -146,10 +142,7 @@ fn run_app(instructions: cli::Instructions) -> Option<NonZeroI32> {
                 .expect("could not serialize config");
             None
         }
-        cli::Task::RunSuite {
-            ref suite,
-            ref out_dir,
-        } => {
+        cli::Task::RunSuite { ref suite } => {
             print!(
                 "{}
 
@@ -158,14 +151,38 @@ Running SSCCE {}:",
                 suite.display()
             );
             let compiler_lock = Mutex::new(());
+            // TODO(harry) deduplicate this
+            let mut out_dir = instructions.config.out_dir.as_ref().map_or_else(
+                || {
+                    let dir = tempfile::Builder::new()
+                        .prefix("elm-torture")
+                        .tempdir()
+                        .expect("Should be able to create a temp_file");
+                    OutDir::Tempory(dir)
+                },
+                OutDir::Provided,
+            );
+            let sscce_out_dir = out_dir.path().join(suite.file_name().expect("todo"));
             let suite_result =
-                compile_and_run(suite, out_dir.as_ref(), &compiler_lock, &instructions);
+                compile_and_run(suite, &sscce_out_dir, &compiler_lock, &instructions);
+            if let Err(CompileAndRunError::RunFailure { .. }) = suite_result {
+                out_dir.persist();
+            } else {
+                let _ = fs::remove_dir_all(&sscce_out_dir);
+            }
             match suite_result {
                 Ok(()) => println!(" Success"),
-                Err(ref e) => println!(
-                    "\n\n{}",
-                    formatting::compile_and_run_error(e, suite, out_dir.as_ref())
-                ),
+                Err(ref e) => {
+                    println!(
+                        "\n\n{}",
+                        formatting::compile_and_run_error(
+                            e,
+                            suite,
+                            out_dir.path(),
+                            instructions.config.out_dir.as_ref()
+                        )
+                    );
+                }
             }
             NonZeroI32::new(get_exit_code(&suite_result))
         }

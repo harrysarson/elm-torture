@@ -29,17 +29,9 @@ struct Opts {
         long,
         value_name = "DIRECTORY",
         about = "A directory containing suites to test",
-        group = "suite_or_suites",
-        conflicts_with = "out-dir"
+        group = "suite_or_suites"
     )]
     suites: Option<PathBuf>,
-
-    #[clap(
-        long,
-        value_name = "DIRECTORY",
-        about = "The directory to place built files in."
-    )]
-    out_dir: Option<PathBuf>,
 
     #[clap(long, value_name = "FILE", about = "Dump the configuration to FILE.")]
     show_config: Option<PathBuf>,
@@ -50,10 +42,7 @@ struct Opts {
 
 pub enum Task {
     DumpConfig(PathBuf),
-    RunSuite {
-        suite: PathBuf,
-        out_dir: Option<PathBuf>,
-    },
+    RunSuite { suite: PathBuf },
     RunSuites(PathBuf),
 }
 
@@ -84,7 +73,6 @@ pub fn get_cli_task() -> Instructions {
     let Opts {
         suite,
         suites,
-        out_dir,
         config_from_file,
         fail_fast,
         show_config,
@@ -106,7 +94,6 @@ pub fn get_cli_task() -> Instructions {
                 suites.map_or_else(
                     || Task::RunSuite {
                         suite: suite.unwrap(),
-                        out_dir,
                     },
                     Task::RunSuites,
                 )
