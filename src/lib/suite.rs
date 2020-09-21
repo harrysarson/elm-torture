@@ -576,19 +576,6 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + 'a>(
         } else {
             let res: Result<(), CompileAndRunError<&Path>> =
                 compile_and_run(&suite, None, compiler_lock, instructions);
-            if let Err(ref e) = res {
-                println!(
-                    "{}",
-                    formatting::compile_and_run_error(
-                        e,
-                        &suite,
-                        match instructions.task {
-                            cli::Task::RunSuite { ref out_dir, .. } => out_dir.as_ref(),
-                            _ => None,
-                        }
-                    )
-                );
-            }
             let failed = match res {
                 Err(CompileAndRunError::CompileFailure { allowed: true, .. })
                 | Err(CompileAndRunError::RunFailure { allowed: true, .. })

@@ -17,6 +17,7 @@ pub fn find_suites(suites_dir: &Path) -> Result<Box<[PathBuf]>, Error> {
         }
         let mut suites = vec![];
         add_suites(suites_dir, &mut suites)?;
+        suites.sort_unstable();
         Ok(suites.into_boxed_slice())
     } else {
         Err(Error::ProvidedPathIsNotDir)
