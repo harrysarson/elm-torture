@@ -1,16 +1,15 @@
 use super::cli;
 use super::config;
 use super::formatting;
-use futures::future;
-use futures::future::Either;
-use futures::future::TryFutureExt;
-use futures::stream::Stream;
-use futures::stream::StreamExt;
+use io::{Read, Write};
 use log::debug;
 use serde::Deserialize;
 use serde::Serialize;
+use std::fs;
+use std::fs::File;
 use std::process::{Output, Stdio};
 use std::{env, ffi::OsStr};
+use std::{io, process::Command};
 use std::{
     path::Path,
     path::PathBuf,
@@ -21,10 +20,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::fs;
-use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::{io, process::Command, time};
+use wait_timeout::ChildExt;
 
 type AnyOneOf<T> = Option<Box<[T]>>;
 
@@ -37,6 +33,35 @@ impl<T> AnyOneOfExt for AnyOneOf<T> {
     type Item = T;
     fn any(&self, f: impl FnMut(&Self::Item) -> bool) -> bool {
         self.as_ref().map_or_else(|| true, |s| s.iter().any(f))
+    }
+}
+
+fn run_until_success<T, E>(
+    max_retries: usize,
+    mut f: impl FnMut() -> Result<T, E>,
+) -> Result<T, E> {
+    for _ in 0..max_retries {
+        if let Ok(val) = f() {
+            return Ok(val);
+        }
+    }
+    f()
+}
+
+trait ResultFlip {
+    type Err;
+    type Ok;
+    fn flip(self) -> Result<Self::Err, Self::Ok>;
+}
+
+impl<T, E> ResultFlip for Result<T, E> {
+    type Err = E;
+    type Ok = T;
+    fn flip(self) -> Result<E, T> {
+        match self {
+            Ok(t) => Err(t),
+            Err(e) => Ok(e),
+        }
     }
 }
 
@@ -217,17 +242,9 @@ pub enum OutDir<P> {
     Persistent(PathBuf),
 }
 
-pub async fn compile(
-    suite: &Path,
-    out_dir: &Path,
-    config: &config::Config,
-) -> Result<(), CompileError> {
-    async fn compile(
-        suite: impl AsRef<Path>,
-        command: &mut Command,
-    ) -> Result<Output, CompileError> {
+pub fn compile(suite: &Path, out_dir: &Path, config: &config::Config) -> Result<(), CompileError> {
+    fn compile(suite: impl AsRef<Path>, command: &mut Command) -> Result<Output, CompileError> {
         fs::remove_dir_all(suite.as_ref().join("elm-stuff"))
-            .await
             .or_else(|e| {
                 if e.kind() == io::ErrorKind::NotFound {
                     Ok(())
@@ -236,7 +253,7 @@ pub async fn compile(
                 }
             })
             .map_err(CompileError::DeletingElmStuff)?;
-        command.output().map_err(CompileError::Process).await
+        command.output().map_err(CompileError::Process)
     };
 
     if !out_dir.exists() {
@@ -247,11 +264,10 @@ pub async fn compile(
     if !suite.join("elm.json").exists() {
         return Err(CompileError::SuiteDoesNotExist);
     }
-    let root_files = if let Ok(mut targets) = File::open(suite.join("targets.txt")).await {
+    let root_files = if let Ok(mut targets) = File::open(suite.join("targets.txt")) {
         let mut contents = String::new();
         targets
             .read_to_string(&mut contents)
-            .await
             .map_err(CompileError::ReadingTargets)?;
         contents.split('\n').map(String::from).collect()
     } else {
@@ -271,23 +287,15 @@ pub async fn compile(
     }
     command.arg(
         fs::canonicalize(out_dir)
-            .await
             .map_err(CompileError::Process)?
             .join("elm.js"),
     );
 
     debug!("Invoking compiler: {:?}", command);
 
-    let res = async {
-        for _ in 0..(config.compiler_reruns().get() - 1) {
-            let op = compile(&suite, &mut command).await?;
-            if op.status.success() {
-                return Ok(op);
-            }
-        }
-        compile(&suite, &mut command).await
-    }
-    .await?;
+    let res = run_until_success(config.compiler_max_retries(), || {
+        compile(&suite, &mut command)
+    })?;
 
     if !res.status.success() {
         return Err(CompileError::Compiler(res));
@@ -300,28 +308,26 @@ pub async fn compile(
     Ok(())
 }
 
-async fn get_suite_config(suite: impl AsRef<Path>) -> Result<Config, GetSuiteConfigError> {
+fn get_suite_config(suite: impl AsRef<Path>) -> Result<Config, GetSuiteConfigError> {
     let expected_output_path = suite.as_ref().join("output.json");
     serde_json::from_slice(
-        &fs::read(expected_output_path)
-            .await
-            .map_err(GetSuiteConfigError::CannotRead)?,
+        &fs::read(expected_output_path).map_err(GetSuiteConfigError::CannotRead)?,
     )
     .map_err(GetSuiteConfigError::Parse)
 }
 
 #[allow(clippy::too_many_lines)]
-pub async fn run(
+pub fn run(
     suite: &Path,
     out_dir: &Path,
     config: &config::Config,
     suite_config: &Config,
 ) -> Result<(), RunError> {
-    async fn read_to_buf(mut read: impl io::AsyncRead + Unpin) -> io::Result<Vec<u8>> {
+    fn read_to_buf(mut read: impl io::Read) -> io::Result<Vec<u8>> {
         let mut buffer = Vec::new();
 
         // read the whole file
-        read.read_to_end(&mut buffer).await?;
+        read.read_to_end(&mut buffer)?;
         Ok(buffer)
     }
 
@@ -337,17 +343,14 @@ pub async fn run(
         &harness_file,
         &include_bytes!("../../embed-assets/run.js")[..],
     )
-    .await
     .map_err(RunError::WritingHarness)?;
     fs::write(
         &output_file,
         &serde_json::to_vec_pretty(&suite_config).expect("Failed to reserialize output json"),
     )
-    .await
     .map_err(RunError::WritingExpectedOutput)?;
 
     File::create(&main_file)
-        .await
         .map_err(RunError::WritingHarness)?
         .write_all(
             br#"
@@ -358,7 +361,6 @@ const expectedOutput = require('./output.json');
 harness(generated, expectedOutput);
 "#,
         )
-        .await
         .map_err(RunError::WritingHarness)?;
 
     let mut runner_child = Command::new(node_exe)
@@ -370,33 +372,27 @@ harness(generated, expectedOutput);
         .spawn()
         .map_err(RunError::NodeProcess)?;
 
-    let maybe_timedout =
-        future::select(time::delay_for(config.run_timeout()), &mut runner_child).await;
+    let runner_status = runner_child
+        .wait_timeout(config.run_timeout())
+        .map_err(RunError::NodeProcess)?
+        .map_or_else(
+            || {
+                runner_child.kill().map_err(RunError::NodeProcess)?;
+                let stdout = read_to_buf(runner_child.stdout.as_mut().unwrap())
+                    .map_err(RunError::NodeProcess)?;
+                let stderr = read_to_buf(runner_child.stderr.as_mut().unwrap())
+                    .map_err(RunError::NodeProcess)?;
+                Err(RunError::Timeout {
+                    after: config.run_timeout(),
+                    stdout,
+                    stderr,
+                })
+            },
+            Ok,
+        )?;
 
-    let runner_status = match maybe_timedout {
-        Either::Left(((), child)) => {
-            child.kill().map_err(RunError::NodeProcess)?;
-            let stdout = read_to_buf(child.stdout.as_mut().unwrap())
-                .await
-                .map_err(RunError::NodeProcess)?;
-            let stderr = read_to_buf(child.stderr.as_mut().unwrap())
-                .await
-                .map_err(RunError::NodeProcess)?;
-            return Err(RunError::Timeout {
-                after: config.run_timeout(),
-                stdout,
-                stderr,
-            });
-        }
-        Either::Right((status, _)) => status.map_err(RunError::NodeProcess)?,
-    };
-
-    let stdout = read_to_buf(runner_child.stdout.unwrap())
-        .await
-        .map_err(RunError::NodeProcess)?;
-    let stderr = read_to_buf(runner_child.stderr.unwrap())
-        .await
-        .map_err(RunError::NodeProcess)?;
+    let stdout = read_to_buf(runner_child.stdout.unwrap()).map_err(RunError::NodeProcess)?;
+    let stderr = read_to_buf(runner_child.stderr.unwrap()).map_err(RunError::NodeProcess)?;
 
     let output = Output {
         status: runner_status,
@@ -453,7 +449,7 @@ impl<P> OutDir<P> {
     }
 }
 
-async fn detect_stdlib_variant(
+fn detect_stdlib_variant(
     elm_compiler: impl AsRef<OsStr>,
 ) -> Result<StdlibVariant, DetectStdlibError> {
     use bstr::ByteSlice;
@@ -462,7 +458,7 @@ async fn detect_stdlib_variant(
 
     debug!("Invoking compiler to detect stdlib variant: {:?}", command);
 
-    let Output { status, stdout, .. } = command.output().await.map_err(DetectStdlibError::Io)?;
+    let Output { status, stdout, .. } = command.output().map_err(DetectStdlibError::Io)?;
 
     if status.success() {
         if stdout.trim().starts_with(b"another-elm") {
@@ -475,7 +471,7 @@ async fn detect_stdlib_variant(
     }
 }
 
-pub async fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
+pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     suite: Ps,
     provided_out_dir: Option<Pe>,
     instructions: &super::cli::Instructions,
@@ -501,9 +497,8 @@ pub async fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
         OutDir::Provided,
     );
 
-    let suite_config = get_suite_config(&suite)
-        .await
-        .map_err(CompileAndRunError::CannotGetSuiteConfig)?;
+    let suite_config =
+        get_suite_config(&suite).map_err(CompileAndRunError::CannotGetSuiteConfig)?;
 
     let compile_failure_allowed = suite_config
         .compile_fails_if
@@ -511,19 +506,18 @@ pub async fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
             opt_level: instructions.config.opt_level(),
         });
 
-    compile(suite.as_ref(), out_dir.path(), &instructions.config)
-        .await
-        .map_err(|e| CompileAndRunError::CompileFailure {
+    compile(suite.as_ref(), out_dir.path(), &instructions.config).map_err(|e| {
+        CompileAndRunError::CompileFailure {
             allowed: compile_failure_allowed,
             reason: e,
-        })?;
+        }
+    })?;
 
     if compile_failure_allowed {
         return Err(CompileAndRunError::ExpectedCompileFailure);
     }
 
     let actual_stdlib_variant = detect_stdlib_variant(instructions.config.elm_compiler())
-        .await
         .map_err(CompileAndRunError::CannotDetectStdlibVariant)?;
 
     let run_failure_allowed = suite_config.run_fails_if.is_met(&RunFailsIfAllFacts {
@@ -542,7 +536,6 @@ pub async fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
         &instructions.config,
         &suite_config,
     )
-    .await
     .map_err(|e| {
         out_dir.persist();
         CompileAndRunError::RunFailure {
@@ -560,11 +553,11 @@ pub async fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
 }
 /**/
 pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
-    suites: impl Stream<Item = Ps> + 'a,
+    suites: impl IntoIterator<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
-) -> impl Stream<Item = (Ps, Result<(), CompileAndRunError<&'static Path>>)> + 'a {
-    async fn scanner<'a, P: AsRef<Path>>(
-        prev_run_failed: Arc<AtomicBool>,
+) -> impl IntoIterator<Item = (Ps, Result<(), CompileAndRunError<&'static Path>>)> + 'a {
+    fn scanner<'a, P: AsRef<Path>>(
+        prev_run_failed: &Arc<AtomicBool>,
         instructions: &'a super::cli::Instructions,
         suite: P,
     ) -> Option<(P, Result<(), CompileAndRunError<&'static Path>>)> {
@@ -572,7 +565,7 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
             None
         } else {
             let res: Result<(), CompileAndRunError<&Path>> =
-                compile_and_run(&suite, None, instructions).await;
+                compile_and_run(&suite, None, instructions);
             if let Err(ref e) = res {
                 println!(
                     "{}",
@@ -597,8 +590,8 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
             Some((suite, res))
         }
     }
-    suites.scan(
+    suites.into_iter().scan(
         Arc::new(AtomicBool::new(false)),
-        move |prev_runs_failed, suite| scanner(prev_runs_failed.clone(), instructions, suite),
+        move |prev_runs_failed, suite| scanner(&prev_runs_failed, instructions, suite),
     )
 }

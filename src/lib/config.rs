@@ -1,9 +1,9 @@
 use clap::Clap;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::str::FromStr;
 use std::string::String;
 use std::time::Duration;
-use std::{fmt, num::NonZeroI32};
 
 #[derive(Debug, Deserialize, Serialize, Clap, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
@@ -29,9 +29,9 @@ pub struct Config {
     #[clap(
         long,
         value_name = "N",
-        about = "Retry compilation (compile at most <N> times) if it fails."
+        about = "Retry compilation (at most <N> times) if it fails."
     )]
-    compiler_reruns: Option<NonZeroI32>,
+    compiler_max_retries: Option<usize>,
     #[clap(
         long,
         value_name = "DURATION",
@@ -43,13 +43,7 @@ pub struct Config {
 
 impl Config {
     pub fn serialize(self) -> impl Serialize {
-        Config {
-            elm_compiler: self.elm_compiler,
-            node: self.node,
-            opt_level: self.opt_level,
-            compiler_reruns: self.compiler_reruns,
-            run_timeout: self.run_timeout,
-        }
+        self
     }
 
     pub fn overwrite_with(self, other: Config) -> Config {
@@ -63,7 +57,7 @@ impl Config {
             elm_compiler: merge!(elm_compiler),
             node: merge!(node),
             opt_level: merge!(opt_level),
-            compiler_reruns: merge!(compiler_reruns),
+            compiler_max_retries: merge!(compiler_max_retries),
             run_timeout: merge!(run_timeout),
         }
     }
@@ -90,9 +84,8 @@ impl Config {
         }
     }
 
-    pub fn compiler_reruns(&self) -> NonZeroI32 {
-        self.compiler_reruns
-            .unwrap_or_else(|| NonZeroI32::new(1).unwrap())
+    pub fn compiler_max_retries(&self) -> usize {
+        self.compiler_max_retries.unwrap_or(1)
     }
 
     pub fn run_timeout(&self) -> Duration {

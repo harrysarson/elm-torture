@@ -5,8 +5,6 @@
 mod lib;
 
 use colored::Colorize;
-use futures::stream;
-use futures::stream::StreamExt;
 use lib::cli;
 use lib::formatting;
 use lib::suite::compile_and_run;
@@ -48,7 +46,7 @@ fn get_exit_code<P>(suite_result: &Result<(), CompileAndRunError<P>>) -> i32 {
     }
 }
 
-async fn run_app(instructions: cli::Instructions) -> Option<NonZeroI32> {
+fn run_app(instructions: cli::Instructions) -> Option<NonZeroI32> {
     let welcome_message = "Elm Torture - stress tests for an elm compiler";
     match &instructions.task {
         cli::Task::DumpConfig(config_file) => {
@@ -68,7 +66,7 @@ Running SSCCE {}:",
                 welcome_message,
                 suite.display()
             );
-            let suite_result = compile_and_run(suite, out_dir.as_ref(), &instructions).await;
+            let suite_result = compile_and_run(suite, out_dir.as_ref(), &instructions);
             match suite_result {
                 Ok(()) => println!(" Success"),
                 Err(ref e) => println!(
@@ -98,10 +96,9 @@ Running the following {} SSCCE{}:
                     }))
                 );
 
-                let suite_results: Vec<_> =
-                    compile_and_run_suites(stream::iter(suites.iter()), &instructions)
-                        .collect()
-                        .await;
+                let suite_results: Vec<_> = compile_and_run_suites(suites.iter(), &instructions)
+                    .into_iter()
+                    .collect();
                 println!(
                     "
 elm-torture has run the following {} SSCCE{}:
@@ -149,12 +146,7 @@ elm-torture has run the following {} SSCCE{}:
     }
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     env_logger::init();
-    process::exit(
-        run_app(cli::get_cli_task())
-            .await
-            .map_or(0, NonZeroI32::get),
-    );
+    process::exit(run_app(cli::get_cli_task()).map_or(0, NonZeroI32::get));
 }
