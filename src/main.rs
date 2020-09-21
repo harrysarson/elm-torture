@@ -11,7 +11,7 @@ use lib::suite::compile_and_run_suites;
 use lib::suite::CompileAndRunError;
 use rayon::prelude::*;
 use std::sync::Mutex;
-use std::{fmt, fs, process};
+use std::{fs, process};
 use std::{num::NonZeroI32, path::Path};
 
 const WELCOME_MESSAGE: &str = "Elm Torture - stress tests for an elm compiler";
@@ -49,59 +49,6 @@ fn get_exit_code<P>(suite_result: &Result<(), CompileAndRunError<P>>) -> i32 {
     }
 }
 
-enum PrintableStatus<D> {
-    WaitingForData,
-    WaitingToPrint(D),
-    Printed,
-}
-
-struct PrinterQueue<D> {
-    queue: Vec<PrintableStatus<D>>,
-}
-
-impl<D> PrinterQueue<D> {
-    fn new() -> Self {
-        Self { queue: vec![] }
-    }
-}
-
-impl<D: fmt::Display> PrinterQueue<D> {
-    fn add_printable(&mut self, i: usize, d: D) {
-        self.print_helper(i, PrintableStatus::WaitingToPrint(d))
-    }
-    fn skip(&mut self, i: usize) {
-        self.print_helper(i, PrintableStatus::Printed)
-    }
-    fn print_helper(&mut self, i: usize, v: PrintableStatus<D>) {
-        if i >= self.queue.len() {
-            self.queue
-                .resize_with(i + 1, || PrintableStatus::WaitingForData)
-        }
-        self.queue[i] = v;
-        for item in &mut self.queue {
-            match item {
-                PrintableStatus::WaitingForData => break,
-                PrintableStatus::WaitingToPrint(d) => {
-                    println!("{}", d);
-                    *item = PrintableStatus::Printed;
-                }
-                PrintableStatus::Printed => {}
-            }
-        }
-    }
-}
-
-impl<D> Drop for PrinterQueue<D> {
-    fn drop(&mut self) {
-        for item in &mut self.queue {
-            assert!(
-                matches!(item, PrintableStatus::Printed),
-                "Unprinted messages in queue on drop"
-            );
-        }
-    }
-}
-
 fn run_suites(
     suites: &[impl AsRef<Path> + Sync],
     instructions: &cli::Instructions,
@@ -124,7 +71,7 @@ Running the following {} SSCCE{}:
         }))
     );
 
-    let printer = Mutex::new(PrinterQueue::new());
+    let printer = Mutex::new(formatting::PrinterQueue::new());
     let suite_results: Vec<_> = compile_and_run_suites(suites.par_iter(), instructions)
         .into_par_iter()
         .inspect(|(suite, res)| {
