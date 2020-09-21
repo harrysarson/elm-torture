@@ -296,3 +296,56 @@ To run this suite individually try `--suite {}` (note `suite` rather than `--sui
         }
     })
 }
+
+enum PrintableStatus<D> {
+    WaitingForData,
+    WaitingToPrint(D),
+    Printed,
+}
+
+pub struct PrinterQueue<D> {
+    queue: Vec<PrintableStatus<D>>,
+}
+
+impl<D> PrinterQueue<D> {
+    pub fn new() -> Self {
+        Self { queue: vec![] }
+    }
+}
+
+impl<D: fmt::Display> PrinterQueue<D> {
+    pub fn add_printable(&mut self, i: usize, d: D) {
+        self.print_helper(i, PrintableStatus::WaitingToPrint(d))
+    }
+    pub fn skip(&mut self, i: usize) {
+        self.print_helper(i, PrintableStatus::Printed)
+    }
+    fn print_helper(&mut self, i: usize, v: PrintableStatus<D>) {
+        if i >= self.queue.len() {
+            self.queue
+                .resize_with(i + 1, || PrintableStatus::WaitingForData)
+        }
+        self.queue[i] = v;
+        for item in &mut self.queue {
+            match item {
+                PrintableStatus::WaitingForData => break,
+                PrintableStatus::WaitingToPrint(d) => {
+                    println!("{}", d);
+                    *item = PrintableStatus::Printed;
+                }
+                PrintableStatus::Printed => {}
+            }
+        }
+    }
+}
+
+impl<D> Drop for PrinterQueue<D> {
+    fn drop(&mut self) {
+        for item in &mut self.queue {
+            assert!(
+                matches!(item, PrintableStatus::Printed),
+                "Unprinted messages in queue on drop"
+            );
+        }
+    }
+}
