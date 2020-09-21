@@ -170,7 +170,12 @@ To inspect the built files that caused this error see: {}",
     })
 }
 
-pub fn compile_and_run_error<'a, Pe: AsRef<Path>, Pp: AsRef<Path> + 'a, Ps: AsRef<Path> + 'a>(
+pub fn compile_and_run_error<
+    'a,
+    Pe: AsRef<Path> + 'a,
+    Pp: AsRef<Path> + 'a,
+    Ps: AsRef<Path> + 'a,
+>(
     err: &'a CompileAndRunError<Pe>,
     suite: Ps,
     provided_path: Option<Pp>,
@@ -179,7 +184,7 @@ pub fn compile_and_run_error<'a, Pe: AsRef<Path>, Pp: AsRef<Path> + 'a, Ps: AsRe
         use CompileAndRunError::*;
         use GetSuiteConfigError::*;
 
-        match err {
+        match &err {
             SuiteNotExist => write!(
                 f,
                 "The provided path to a suite: \"{}\"  does not exist",
