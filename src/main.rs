@@ -4,15 +4,14 @@
 
 mod lib;
 use colored::Colorize;
-use io::stdout;
 use lib::cli;
 use lib::formatting;
 use lib::suite::compile_and_run;
 use lib::suite::compile_and_run_suites;
 use lib::suite::CompileAndRunError;
 use rayon::prelude::*;
+use std::sync::Mutex;
 use std::{fmt, fs, process};
-use std::{io, sync::Mutex};
 use std::{num::NonZeroI32, path::Path};
 
 const WELCOME_MESSAGE: &str = "Elm Torture - stress tests for an elm compiler";

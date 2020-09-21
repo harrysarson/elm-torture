@@ -1,6 +1,4 @@
-use super::cli;
 use super::config;
-use super::formatting;
 use io::{Read, Write};
 use log::debug;
 use rayon::prelude::*;
