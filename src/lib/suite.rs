@@ -3,21 +3,19 @@ use super::config;
 use super::formatting;
 use io::{Read, Write};
 use log::debug;
+use rayon::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
-use std::fs;
 use std::fs::File;
 use std::process::{Output, Stdio};
 use std::{env, ffi::OsStr};
+use std::{fs, sync::Mutex};
 use std::{io, process::Command};
 use std::{
     path::Path,
     path::PathBuf,
     string,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 use wait_timeout::ChildExt;
@@ -242,7 +240,12 @@ pub enum OutDir<P> {
     Persistent(PathBuf),
 }
 
-pub fn compile(suite: &Path, out_dir: &Path, config: &config::Config) -> Result<(), CompileError> {
+pub fn compile(
+    suite: &Path,
+    out_dir: &Path,
+    compiler_lock: &Mutex<()>,
+    config: &config::Config,
+) -> Result<(), CompileError> {
     fn compile(suite: impl AsRef<Path>, command: &mut Command) -> Result<Output, CompileError> {
         fs::remove_dir_all(suite.as_ref().join("elm-stuff"))
             .or_else(|e| {
@@ -294,6 +297,7 @@ pub fn compile(suite: &Path, out_dir: &Path, config: &config::Config) -> Result<
     debug!("Invoking compiler: {:?}", command);
 
     let res = run_until_success(config.compiler_max_retries(), || {
+        let _lock = compiler_lock.lock();
         compile(&suite, &mut command)
     })?;
 
@@ -474,6 +478,7 @@ fn detect_stdlib_variant(
 pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     suite: Ps,
     provided_out_dir: Option<Pe>,
+    compiler_lock: &Mutex<()>,
     instructions: &super::cli::Instructions,
 ) -> Result<(), CompileAndRunError<Pe>> {
     if !suite.as_ref().exists() {
@@ -506,11 +511,15 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
             opt_level: instructions.config.opt_level(),
         });
 
-    compile(suite.as_ref(), out_dir.path(), &instructions.config).map_err(|e| {
-        CompileAndRunError::CompileFailure {
-            allowed: compile_failure_allowed,
-            reason: e,
-        }
+    compile(
+        suite.as_ref(),
+        out_dir.path(),
+        &compiler_lock,
+        &instructions.config,
+    )
+    .map_err(|e| CompileAndRunError::CompileFailure {
+        allowed: compile_failure_allowed,
+        reason: e,
     })?;
 
     if compile_failure_allowed {
@@ -552,12 +561,13 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     Ok(())
 }
 /**/
-pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
-    suites: impl IntoIterator<Item = Ps> + 'a,
+pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + 'a>(
+    suites: impl IntoParallelIterator<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
-) -> impl IntoIterator<Item = (Ps, Result<(), CompileAndRunError<&'static Path>>)> + 'a {
+) -> impl IntoParallelIterator<Item = (Ps, Result<(), CompileAndRunError<&'static Path>>)> + 'a {
     fn scanner<'a, P: AsRef<Path>>(
-        prev_run_failed: &Arc<AtomicBool>,
+        prev_run_failed: &AtomicBool,
+        compiler_lock: &Mutex<()>,
         instructions: &'a super::cli::Instructions,
         suite: P,
     ) -> Option<(P, Result<(), CompileAndRunError<&'static Path>>)> {
@@ -565,7 +575,7 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
             None
         } else {
             let res: Result<(), CompileAndRunError<&Path>> =
-                compile_and_run(&suite, None, instructions);
+                compile_and_run(&suite, None, compiler_lock, instructions);
             if let Err(ref e) = res {
                 println!(
                     "{}",
@@ -590,8 +600,10 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + 'a>(
             Some((suite, res))
         }
     }
-    suites.into_iter().scan(
-        Arc::new(AtomicBool::new(false)),
-        move |prev_runs_failed, suite| scanner(&prev_runs_failed, instructions, suite),
-    )
+    let compiler_lock = Mutex::new(());
+    let prev_runs_failed = AtomicBool::new(false);
+    suites
+        .into_par_iter()
+        .map(move |suite| scanner(&prev_runs_failed, &compiler_lock, instructions, suite))
+        .while_some()
 }

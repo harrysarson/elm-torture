@@ -3,14 +3,15 @@
 #![allow(clippy::option_if_let_else)]
 
 mod lib;
-
 use colored::Colorize;
 use lib::cli;
 use lib::formatting;
 use lib::suite::compile_and_run;
 use lib::suite::compile_and_run_suites;
 use lib::suite::CompileAndRunError;
+use rayon::prelude::*;
 use std::num::NonZeroI32;
+use std::sync::Mutex;
 use std::{fs, process};
 
 #[allow(clippy::enum_glob_use)]
@@ -66,7 +67,9 @@ Running SSCCE {}:",
                 welcome_message,
                 suite.display()
             );
-            let suite_result = compile_and_run(suite, out_dir.as_ref(), &instructions);
+            let compiler_lock = Mutex::new(());
+            let suite_result =
+                compile_and_run(suite, out_dir.as_ref(), &compiler_lock, &instructions);
             match suite_result {
                 Ok(()) => println!(" Success"),
                 Err(ref e) => println!(
@@ -96,9 +99,10 @@ Running the following {} SSCCE{}:
                     }))
                 );
 
-                let suite_results: Vec<_> = compile_and_run_suites(suites.iter(), &instructions)
-                    .into_iter()
-                    .collect();
+                let suite_results: Vec<_> =
+                    compile_and_run_suites(suites.par_iter(), &instructions)
+                        .into_par_iter()
+                        .collect();
                 println!(
                     "
 elm-torture has run the following {} SSCCE{}:
