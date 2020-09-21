@@ -212,7 +212,7 @@ pub enum RunError {
 }
 
 #[derive(Debug)]
-pub enum CompileAndRunError<P> {
+pub enum CompileAndRunError {
     SuiteNotExist,
     SuiteNotDir,
     SuiteNotElm,
@@ -223,7 +223,6 @@ pub enum CompileAndRunError<P> {
     },
     RunFailure {
         allowed: bool,
-        outdir: OutDir<P>,
         reason: super::suite::RunError,
     },
     ExpectedCompileFailure,
@@ -240,7 +239,7 @@ pub enum OutDir<P> {
 
 pub fn compile(
     suite: &Path,
-    out_dir: &Path,
+    out_dir: impl AsRef<Path>,
     compiler_lock: &Mutex<()>,
     config: &config::Config,
 ) -> Result<(), CompileError> {
@@ -257,9 +256,9 @@ pub fn compile(
         command.output().map_err(CompileError::Process)
     };
 
-    if !out_dir.exists() {
-        let _ = fs::create_dir(out_dir);
-    } else if !out_dir.is_dir() {
+    if !out_dir.as_ref().exists() {
+        let _ = fs::create_dir(&out_dir);
+    } else if !out_dir.as_ref().is_dir() {
         return Err(CompileError::OutDirIsNotDir);
     }
     if !suite.join("elm.json").exists() {
@@ -287,7 +286,7 @@ pub fn compile(
         command.env("ELM_HOME", elm_home);
     }
     command.arg(
-        fs::canonicalize(out_dir)
+        fs::canonicalize(&out_dir)
             .map_err(CompileError::Process)?
             .join("elm.js"),
     );
@@ -475,10 +474,10 @@ fn detect_stdlib_variant(
 
 pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     suite: Ps,
-    provided_out_dir: Option<Pe>,
+    out_dir: Pe,
     compiler_lock: &Mutex<()>,
     instructions: &super::cli::Instructions,
-) -> Result<(), CompileAndRunError<Pe>> {
+) -> Result<(), CompileAndRunError> {
     if !suite.as_ref().exists() {
         return Err(CompileAndRunError::SuiteNotExist);
     }
@@ -488,17 +487,6 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     if !suite.as_ref().join("elm.json").exists() {
         return Err(CompileAndRunError::SuiteNotElm);
     }
-
-    let mut out_dir = provided_out_dir.map_or_else(
-        || {
-            let dir = tempfile::Builder::new()
-                .prefix("elm-torture")
-                .tempdir()
-                .expect("Should be able to create a temp_file");
-            OutDir::Tempory(dir)
-        },
-        OutDir::Provided,
-    );
 
     let suite_config =
         get_suite_config(&suite).map_err(CompileAndRunError::CannotGetSuiteConfig)?;
@@ -511,7 +499,7 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
 
     compile(
         suite.as_ref(),
-        out_dir.path(),
+        &out_dir,
         &compiler_lock,
         &instructions.config,
     )
@@ -539,17 +527,13 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
 
     run(
         suite.as_ref(),
-        out_dir.path(),
+        out_dir.as_ref(),
         &instructions.config,
         &suite_config,
     )
-    .map_err(|e| {
-        out_dir.persist();
-        CompileAndRunError::RunFailure {
-            allowed: run_failure_allowed,
-            outdir: out_dir,
-            reason: e,
-        }
+    .map_err(|e| CompileAndRunError::RunFailure {
+        allowed: run_failure_allowed,
+        reason: e,
     })?;
 
     if run_failure_allowed {
@@ -562,18 +546,34 @@ pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
 pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + 'a>(
     suites: impl IntoParallelIterator<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
-) -> impl IntoParallelIterator<Item = (Ps, Result<(), CompileAndRunError<&'static Path>>)> + 'a {
-    fn scanner<'a, P: AsRef<Path>>(
-        prev_run_failed: &AtomicBool,
-        compiler_lock: &Mutex<()>,
-        instructions: &'a super::cli::Instructions,
-        suite: P,
-    ) -> Option<(P, Result<(), CompileAndRunError<&'static Path>>)> {
-        if instructions.fail_fast && prev_run_failed.load(Ordering::Relaxed) {
+) -> impl IntoParallelIterator<Item = (Ps, PathBuf, Result<(), CompileAndRunError>)> + 'a {
+    let (tmp_dir_raw, out_dir) = if let Some(out_dir) = &instructions.config.out_dir {
+        (None, out_dir.to_path_buf())
+    } else {
+        let td = tempfile::Builder::new()
+            .prefix("elm-torture")
+            .tempdir()
+            .expect("Should be able to create a temp_file");
+        let pb = td.path().to_path_buf();
+        (Some(td), pb)
+    };
+    let tmp_dir = Mutex::new(tmp_dir_raw);
+    let compiler_lock = Mutex::new(());
+    let prev_runs_failed = AtomicBool::new(false);
+    let scanner = move |suite: Ps| -> Option<(Ps, PathBuf, Result<(), CompileAndRunError>)> {
+        if instructions.fail_fast && prev_runs_failed.load(Ordering::Relaxed) {
             None
         } else {
-            let res: Result<(), CompileAndRunError<&Path>> =
-                compile_and_run(&suite, None, compiler_lock, instructions);
+            let sscce_out_dir = out_dir.join(suite.as_ref().file_name().expect("todo"));
+            let res: Result<(), CompileAndRunError> =
+                compile_and_run(&suite, &sscce_out_dir, &compiler_lock, instructions);
+            if let Err(CompileAndRunError::RunFailure { .. }) = res {
+                if let Some(dir) = tmp_dir.lock().unwrap().take() {
+                    dir.into_path();
+                }
+            } else {
+                let _ = fs::remove_dir_all(&sscce_out_dir);
+            }
             let failed = match res {
                 Err(CompileAndRunError::CompileFailure { allowed: true, .. })
                 | Err(CompileAndRunError::RunFailure { allowed: true, .. })
@@ -581,14 +581,9 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + 'a>(
                 Err(_) => true,
             };
             // Never clear `prev_run_failed`, only set it.
-            prev_run_failed.fetch_or(failed, Ordering::Relaxed);
-            Some((suite, res))
+            prev_runs_failed.fetch_or(failed, Ordering::Relaxed);
+            Some((suite, sscce_out_dir, res))
         }
-    }
-    let compiler_lock = Mutex::new(());
-    let prev_runs_failed = AtomicBool::new(false);
-    suites
-        .into_par_iter()
-        .map(move |suite| scanner(&prev_runs_failed, &compiler_lock, instructions, suite))
-        .while_some()
+    };
+    suites.into_par_iter().map(scanner).while_some()
 }

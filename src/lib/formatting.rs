@@ -176,8 +176,9 @@ pub fn compile_and_run_error<
     Pp: AsRef<Path> + 'a,
     Ps: AsRef<Path> + 'a,
 >(
-    err: &'a CompileAndRunError<Pe>,
+    err: &'a CompileAndRunError,
     suite: Ps,
+    out_dir: Pe,
     provided_path: Option<Pp>,
 ) -> impl fmt::Display + 'a {
     easy_format(move |f| {
@@ -234,16 +235,12 @@ pub fn compile_and_run_error<
                 }
             }
 
-            RunFailure {
-                allowed,
-                outdir,
-                reason,
-            } => {
+            RunFailure { allowed, reason } => {
                 write!(
                     f,
                     "Suite {} failed at run time.\n{}\n",
                     &suite.as_ref().display(),
-                    indented::indented(run_error(&reason, outdir.path()))
+                    indented::indented(run_error(&reason, out_dir.as_ref()))
                 )?;
                 if *allowed {
                     write!(f, "Failure allowed, continuing...")
