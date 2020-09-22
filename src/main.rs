@@ -52,6 +52,7 @@ fn get_exit_code(suite_result: &Result<(), CompileAndRunError>) -> i32 {
 
 // fn collect_and_print()
 
+#[allow(clippy::too_many_lines)]
 fn run_suites(
     suites: &[impl AsRef<Path> + Sync],
     instructions: &cli::Instructions,
@@ -74,18 +75,19 @@ Running the following {} SSCCE{}:
         }))
     );
 
-    // let printer = Mutex::new(formatting::PrinterQueue::new());
     let (res_send, res_recv) = crossbeam_channel::bounded(suites.len());
-    compile_and_run_suites(suites.par_iter(), instructions)
-        .into_par_iter()
-        .for_each(|v| res_send.send(v).unwrap());
+    let suite_results: Vec<_> = rayon::scope(|s| {
+        s.spawn(|_| {
+            compile_and_run_suites(suites.par_iter(), instructions)
+                .into_par_iter()
+                .for_each(|v| res_send.send(v).unwrap());
+            drop(res_send);
+        });
 
-    let suite_results: Vec<_> = {
         let block = |v: &mut Vec<_>| v.resize_with(suites.len(), || Cell::new(None));
         let suite_results = Vec::new().also(block);
         let mut print_iter = suite_results.iter().peekable();
-        for _ in 0..suites.len() {
-            let res = res_recv.recv().unwrap();
+        while let Ok(res) = res_recv.recv() {
             let position = suites
                 .iter()
                 .position(|s| s.as_ref() == res.0.as_ref())
@@ -125,7 +127,7 @@ Running the following {} SSCCE{}:
             .into_iter()
             .map(|r| r.into_inner().unwrap())
             .collect()
-    };
+    });
 
     // .inspect(|(suite, out_dir, res)| {
     //     let index = suites
