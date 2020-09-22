@@ -10,6 +10,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "apply"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f47b57fc4521e3cae26a4d45b5227f8fadee4c345be0fefd8d5d1711afb8aeb9"
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -155,6 +161,7 @@ checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 name = "elm-torture"
 version = "0.1.0"
 dependencies = [
+ "apply",
  "bstr",
  "clap",
  "colored",

@@ -3,13 +3,14 @@
 #![allow(clippy::option_if_let_else)]
 
 mod lib;
+
+use apply::Apply;
 use colored::Colorize;
+use lib::cli;
 use lib::formatting;
-use lib::suite::compile_and_run;
 use lib::suite::compile_and_run_suites;
 use lib::suite::CompileAndRunError;
-use lib::{cli, suite::OutDir};
-use rayon::prelude::*;
+use rayon::{iter, prelude::*};
 use std::sync::Mutex;
 use std::{fs, process};
 use std::{num::NonZeroI32, path::Path};
@@ -150,26 +151,15 @@ Running SSCCE {}:",
                 WELCOME_MESSAGE,
                 suite.display()
             );
-            let compiler_lock = Mutex::new(());
-            // TODO(harry) deduplicate this
-            let mut out_dir = instructions.config.out_dir.as_ref().map_or_else(
-                || {
-                    let dir = tempfile::Builder::new()
-                        .prefix("elm-torture")
-                        .tempdir()
-                        .expect("Should be able to create a temp_file");
-                    OutDir::Tempory(dir)
-                },
-                OutDir::Provided,
-            );
-            let sscce_out_dir = out_dir.path().join(suite.file_name().expect("todo"));
-            let suite_result =
-                compile_and_run(suite, &sscce_out_dir, &compiler_lock, &instructions);
-            if let Err(CompileAndRunError::RunFailure { .. }) = suite_result {
-                out_dir.persist();
-            } else {
-                let _ = fs::remove_dir_all(&sscce_out_dir);
-            }
+            let (suite2, sscce_out_dir, suite_result) =
+                compile_and_run_suites(iter::once(suite), &instructions)
+                    .into_par_iter()
+                    .collect::<Vec<_>>()
+                    .apply(|mut v| {
+                        assert!(v.len() == 1);
+                        v.pop().unwrap()
+                    });
+            assert!(suite2 == suite);
             match suite_result {
                 Ok(()) => println!(" Success"),
                 Err(ref e) => {
@@ -178,7 +168,7 @@ Running SSCCE {}:",
                         formatting::compile_and_run_error(
                             e,
                             suite,
-                            out_dir.path(),
+                            sscce_out_dir,
                             instructions.config.out_dir.as_ref()
                         )
                     );
