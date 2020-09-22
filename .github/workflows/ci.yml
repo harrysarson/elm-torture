@@ -80,6 +80,8 @@ jobs:
           command: build
 
       - name: Basic torture run
+        env:
+          RUST_LOG: debug
         run: cargo run -- --suites suite --config config.json
 
       - name: Debug torture run
