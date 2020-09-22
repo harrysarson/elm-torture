@@ -1,4 +1,5 @@
 use super::config;
+use apply::Apply;
 use io::{Read, Write};
 use log::debug;
 use rayon::prelude::*;
@@ -184,6 +185,7 @@ pub enum CompileError {
 #[derive(Debug)]
 pub enum DetectStdlibError {
     Io(io::Error),
+    CompilerNotFound(which::Error),
     Parsing(Box<[u8]>),
 }
 #[derive(Debug)]
@@ -236,10 +238,6 @@ fn set_elm_home(command: &mut Command) {
     }
 }
 
-fn resolve_compiler(elm_compiler: impl AsRef<OsStr>) -> Result<PathBuf, CompileError> {
-    which::which(elm_compiler).map_err(CompileError::CompilerNotFound)
-}
-
 fn compile(
     suite: &Path,
     out_dir: impl AsRef<Path>,
@@ -276,7 +274,9 @@ fn compile(
     } else {
         vec![String::from("Main.elm")]
     };
-    let mut command = Command::new(resolve_compiler(config.elm_compiler())?);
+    let mut command = which::which(config.elm_compiler())
+        .map_err(CompileError::CompilerNotFound)?
+        .apply(Command::new);
 
     command.current_dir(suite);
     command.arg("make");
@@ -426,7 +426,9 @@ fn detect_stdlib_variant(
     elm_compiler: impl AsRef<OsStr>,
 ) -> Result<StdlibVariant, DetectStdlibError> {
     use bstr::ByteSlice;
-    let mut command = Command::new(resolve_compiler(config.elm_compiler());
+    let mut command = which::which(elm_compiler)
+        .map_err(DetectStdlibError::CompilerNotFound)?
+        .apply(Command::new);
     command.arg("--stdlib-variant");
     set_elm_home(&mut command);
 
