@@ -165,6 +165,7 @@ dependencies = [
  "bstr",
  "clap",
  "colored",
+ "crossbeam-channel",
  "env_logger",
  "humantime 2.0.1",
  "humantime-serde",
