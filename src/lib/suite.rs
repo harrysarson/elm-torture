@@ -230,14 +230,7 @@ pub enum CompileAndRunError {
     CannotDetectStdlibVariant(DetectStdlibError),
 }
 
-#[derive(Debug)]
-pub enum OutDir<P> {
-    Provided(P),
-    Tempory(tempfile::TempDir),
-    Persistent(PathBuf),
-}
-
-pub fn compile(
+fn compile(
     suite: &Path,
     out_dir: impl AsRef<Path>,
     compiler_lock: &Mutex<()>,
@@ -318,7 +311,7 @@ fn get_suite_config(suite: impl AsRef<Path>) -> Result<Config, GetSuiteConfigErr
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn run(
+fn run(
     suite: &Path,
     out_dir: &Path,
     config: &config::Config,
@@ -423,33 +416,6 @@ harness(generated, expectedOutput);
     Ok(())
 }
 
-impl<P> OutDir<P> {
-    pub fn path(&self) -> &Path
-    where
-        P: AsRef<Path>,
-    {
-        match self {
-            Self::Provided(p) => p.as_ref(),
-            Self::Tempory(ref p) => p.path(),
-            Self::Persistent(ref p) => p,
-        }
-    }
-
-    pub fn persist(&mut self) {
-        replace_with::replace_with(
-            self,
-            || Self::Persistent(PathBuf::new()),
-            |od| {
-                if let Self::Tempory(tempdir) = od {
-                    Self::Persistent(tempdir.into_path())
-                } else {
-                    od
-                }
-            },
-        )
-    }
-}
-
 fn detect_stdlib_variant(
     elm_compiler: impl AsRef<OsStr>,
 ) -> Result<StdlibVariant, DetectStdlibError> {
@@ -472,7 +438,7 @@ fn detect_stdlib_variant(
     }
 }
 
-pub fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
+fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
     suite: Ps,
     out_dir: Pe,
     compiler_lock: &Mutex<()>,
