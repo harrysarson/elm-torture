@@ -230,6 +230,16 @@ pub enum CompileAndRunError {
     CannotDetectStdlibVariant(DetectStdlibError),
 }
 
+fn set_elm_home(command: &mut Command) {
+    if let Some(elm_home) = env::var_os("ELM_HOME") {
+        command.env("ELM_HOME", elm_home);
+    }
+}
+
+fn resolve_compiler(elm_compiler: impl AsRef<OsStr>) -> Result<PathBuf, CompileError> {
+    which::which(elm_compiler).map_err(CompileError::CompilerNotFound)
+}
+
 fn compile(
     suite: &Path,
     out_dir: impl AsRef<Path>,
@@ -266,18 +276,14 @@ fn compile(
     } else {
         vec![String::from("Main.elm")]
     };
-    let elm_compiler =
-        which::which(&config.elm_compiler()).map_err(CompileError::CompilerNotFound)?;
-    let mut command = Command::new(elm_compiler);
+    let mut command = Command::new(resolve_compiler(config.elm_compiler())?);
 
     command.current_dir(suite);
     command.arg("make");
     command.args(root_files);
     command.args(config.args().iter());
     command.arg("--output");
-    if let Some(elm_home) = env::var_os("ELM_HOME") {
-        command.env("ELM_HOME", elm_home);
-    }
+    set_elm_home(&mut command);
     command.arg(
         fs::canonicalize(&out_dir)
             .map_err(CompileError::Process)?
@@ -420,8 +426,9 @@ fn detect_stdlib_variant(
     elm_compiler: impl AsRef<OsStr>,
 ) -> Result<StdlibVariant, DetectStdlibError> {
     use bstr::ByteSlice;
-    let mut command = Command::new(elm_compiler);
+    let mut command = Command::new(resolve_compiler(config.elm_compiler());
     command.arg("--stdlib-variant");
+    set_elm_home(&mut command);
 
     debug!("Invoking compiler to detect stdlib variant: {:?}", command);
 
