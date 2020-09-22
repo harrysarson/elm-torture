@@ -4,14 +4,14 @@
 
 mod lib;
 
-use apply::Apply;
+use apply::{Also, Apply};
 use colored::Colorize;
 use lib::cli;
 use lib::formatting;
 use lib::suite::compile_and_run_suites;
 use lib::suite::CompileAndRunError;
 use rayon::{iter, prelude::*};
-use std::sync::Mutex;
+use std::cell::Cell;
 use std::{fs, process};
 use std::{num::NonZeroI32, path::Path};
 
@@ -50,6 +50,8 @@ fn get_exit_code(suite_result: &Result<(), CompileAndRunError>) -> i32 {
     }
 }
 
+// fn collect_and_print()
+
 fn run_suites(
     suites: &[impl AsRef<Path> + Sync],
     instructions: &cli::Instructions,
@@ -72,32 +74,82 @@ Running the following {} SSCCE{}:
         }))
     );
 
-    let printer = Mutex::new(formatting::PrinterQueue::new());
-    let suite_results: Vec<_> = compile_and_run_suites(suites.par_iter(), instructions)
+    // let printer = Mutex::new(formatting::PrinterQueue::new());
+    let (res_send, res_recv) = crossbeam_channel::bounded(suites.len());
+    compile_and_run_suites(suites.par_iter(), instructions)
         .into_par_iter()
-        .inspect(|(suite, out_dir, res)| {
-            let index = suites
+        .for_each(|v| res_send.send(v).unwrap());
+
+    let suite_results: Vec<_> = {
+        let block = |v: &mut Vec<_>| v.resize_with(suites.len(), || Cell::new(None));
+        let suite_results = Vec::new().also(block);
+        let mut print_iter = suite_results.iter().peekable();
+        for _ in 0..suites.len() {
+            let res = res_recv.recv().unwrap();
+            let position = suites
                 .iter()
-                .position(|some_suite| some_suite.as_ref() == suite.as_ref())
+                .position(|s| s.as_ref() == res.0.as_ref())
                 .unwrap();
-            if let Err(e) = res {
-                printer.lock().unwrap().add_printable(
-                    index,
-                    format!(
-                        "{}",
-                        indented::indented(formatting::compile_and_run_error(
-                            e,
-                            suite,
-                            out_dir,
-                            instructions.config.out_dir.as_ref(),
-                        ))
-                    ),
-                );
-            } else {
-                printer.lock().unwrap().skip(index)
-            }
-        })
-        .collect();
+            let old_value = suite_results[position].replace(Some(res));
+            assert!(old_value.is_none());
+            let maybe_printable = print_iter.peek().unwrap();
+            maybe_printable
+                .replace(None)
+                .apply(|printable| {
+                    let print_done = if let Some((suite, out_dir, result)) = &printable {
+                        if let Err(e) = &result {
+                            println!(
+                                "{}",
+                                indented::indented(formatting::compile_and_run_error(
+                                    e,
+                                    suite,
+                                    &out_dir,
+                                    instructions.config.out_dir.as_ref(),
+                                ))
+                            );
+                        };
+                        true
+                    } else {
+                        false
+                    };
+                    maybe_printable.set(printable);
+                    print_done
+                })
+                .apply(|print_done| {
+                    if print_done {
+                        print_iter.next().unwrap();
+                    }
+                });
+        }
+        suite_results
+            .into_iter()
+            .map(|r| r.into_inner().unwrap())
+            .collect()
+    };
+
+    // .inspect(|(suite, out_dir, res)| {
+    //     let index = suites
+    //         .iter()
+    //         .position(|some_suite| some_suite.as_ref() == suite.as_ref())
+    //         .unwrap();
+    //     if let Err(e) = res {
+    //         printer.lock().unwrap().add_printable(
+    //             index,
+    //             format!(
+    //                 "{}",
+    //                 indented::indented(formatting::compile_and_run_error(
+    //                     e,
+    //                     suite,
+    //                     out_dir,
+    //                     instructions.config.out_dir.as_ref(),
+    //                 ))
+    //             ),
+    //         );
+    //     } else {
+    //         printer.lock().unwrap().skip(index)
+    //     }
+    // })
+    // .collect();
 
     println!(
         "
