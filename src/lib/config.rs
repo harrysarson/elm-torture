@@ -1,8 +1,8 @@
 use clap::Clap;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::string::String;
 use std::time::Duration;
-use std::{ffi::OsString, str::FromStr};
 use std::{fmt, path::PathBuf};
 
 #[derive(Debug, Deserialize, Serialize, Clap, PartialEq, Eq, Clone, Copy, Hash)]
@@ -45,8 +45,15 @@ impl fmt::Display for OptimizationLevel {
     }
 }
 
+// fn serialize_os_str<S>(str: &OsStr, s: S) -> Result<S::Ok, S::Error>
+// where
+//     S: serde::Serializer,
+// {
+// }
+
 #[derive(Debug, Default, Deserialize, Serialize, Clap)]
 #[serde(deny_unknown_fields)]
+#[serde(rename_all = "kebab-case")]
 pub struct Config {
     #[clap(
         long,
@@ -54,8 +61,10 @@ pub struct Config {
         use_delimiter(true),
         about = "Path to elm compiler."
     )]
-    elm_compilers: Option<Vec<OsString>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    elm_compilers: Option<Vec<String>>,
     #[clap(long, about = "Path to node.")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     node: Option<String>,
     #[clap(
         short,
@@ -64,12 +73,14 @@ pub struct Config {
         use_delimiter(true),
         about = "Optimization level to use when compiling SSCCEs."
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     opt_levels: Option<Vec<OptimizationLevel>>,
     #[clap(
         long,
         value_name = "N",
         about = "Retry compilation (at most <N> times) if it fails."
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     compiler_max_retries: Option<usize>,
     #[clap(
         long,
@@ -77,6 +88,7 @@ pub struct Config {
         about = "Report run time failure if SSCCE takes more than <DURATION> to run.",
         parse(try_from_str = humantime::parse_duration)
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     run_timeout: Option<Duration>,
 
     #[clap(
@@ -84,6 +96,7 @@ pub struct Config {
         value_name = "DIRECTORY",
         about = "The directory to place built files in."
     )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub out_dir: Option<PathBuf>,
 }
 
@@ -109,9 +122,9 @@ impl Config {
         }
     }
 
-    pub fn elm_compilers(&self) -> &Vec<OsString> {
+    pub fn elm_compilers(&self) -> &Vec<String> {
         lazy_static::lazy_static! {
-            static ref ELM: Vec<OsString> = vec![OsString::from("elm")];
+            static ref ELM: Vec<String> = vec!["elm".to_string()];
         }
         &self.elm_compilers.as_ref().unwrap_or(&*ELM)
     }

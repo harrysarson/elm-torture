@@ -9,6 +9,7 @@ use lib::cli;
 use lib::formatting;
 use lib::suite;
 use rayon::prelude::*;
+use std::io::Write;
 use std::{collections::HashSet, fs, process};
 use std::{num::NonZeroI32, path::Path};
 
@@ -181,9 +182,10 @@ elm-torture has run the following {} SSCCE{}:
 fn run_app(instructions: cli::Instructions) -> Option<NonZeroI32> {
     match &instructions.task {
         cli::Task::DumpConfig(config_file) => {
-            let file = fs::File::create(config_file).expect("could create config file");
-            serde_json::to_writer_pretty(file, &instructions.config.serialize())
+            let mut file = fs::File::create(config_file).expect("could create config file");
+            serde_json::to_writer_pretty(&mut file, &instructions.config.serialize())
                 .expect("could not serialize config");
+            writeln!(&mut file).expect("could not write to file config");
             None
         }
         cli::Task::RunSuites(ref suite_dir) => match lib::find_suites::find_suites(&suite_dir) {
