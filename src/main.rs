@@ -45,6 +45,33 @@ fn get_exit_code(err: &suite::CompileAndRunError) -> i32 {
     }
 }
 
+fn sscce_result_printer(
+    suite::CompileAndRunResults {
+        suite,
+        sscce_out_dir,
+        errors,
+    }: &suite::CompileAndRunResults<impl AsRef<Path>>,
+) {
+    let errors_to_print = errors.iter().filter_map(|(ol, me)| match me {
+        Some(suite::CompileAndRunError::RunFailure { allowed, .. })
+        | Some(suite::CompileAndRunError::CompileFailure { allowed, .. })
+            if *allowed =>
+        {
+            None
+        }
+        e => Some(ol).zip(e.as_ref()),
+    });
+    for ((elm_compiler, opt_level), e) in errors_to_print {
+        println!(
+            "{} compiling with {} in {} optimisation mode\n{}",
+            suite.as_ref().display().to_string().black().on_white(),
+            elm_compiler.to_string().black().on_white(),
+            opt_level.to_string().black().on_white(),
+            indented::indented(formatting::compile_and_run_error(e, suite, &sscce_out_dir))
+        );
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_suites(
     suites: &[impl AsRef<Path> + Sync],
@@ -78,27 +105,7 @@ Running the following {} SSCCE{}:
                         .position(|s| s.as_ref() == suite.as_ref())
                         .unwrap()
                 },
-                |suite::CompileAndRunResults {
-                     suite,
-                     sscce_out_dir,
-                     errors,
-                 }| {
-                    for ((elm_compiler, opt_level), e) in
-                        errors.iter().filter_map(|(ol, e)| Some(ol).zip(e.as_ref()))
-                    {
-                        println!(
-                            "{} compiling with {} in {} optimisation mode\n{}",
-                            suite.as_ref().display().to_string().black().on_white(),
-                            elm_compiler.to_string().black().on_white(),
-                            opt_level.to_string().black().on_white(),
-                            indented::indented(formatting::compile_and_run_error(
-                                e,
-                                suite,
-                                &sscce_out_dir
-                            ))
-                        );
-                    }
-                },
+                sscce_result_printer,
             );
 
             println!(
