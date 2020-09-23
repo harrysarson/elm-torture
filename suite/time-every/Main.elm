@@ -11,52 +11,64 @@ type Msg
     | Time2
 
 
-type Model
+type Item
     = One
     | Two
     | Three
+    | Four
+
+
+type alias Model =
+    ( Item, List Item )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+update msg ( item1, items ) =
     case msg of
         Init ->
-            ( Two
+            ( ( Two, item1 :: items )
             , Cmd.none
             )
 
         Time1 ->
-            ( Two
+            ( ( Three, item1 :: items )
             , Util.Cmds.write "1"
             )
 
         Time2 ->
-            ( Three
+            ( ( Four, item1 :: items )
             , Util.Cmds.write "2"
             )
 
 
 subscriptions : Model -> Sub Msg
-subscriptions model =
-    case model of
+subscriptions ( item, _ ) =
+    let
+        subs =
+            Sub.batch
+                [ Time.every 30 (\_ -> Time1)
+                , Time.every 100 (\_ -> Time2)
+                ]
+    in
+    case item of
         -- Get app in sync with 300ms intervals
         One ->
             Time.every 300 (\_ -> Init)
 
         Two ->
-            Sub.batch
-                [ Time.every 30 (\_ -> Time1)
-                , Time.every 100 (\_ -> Time2)
-                ]
+            subs
 
         Three ->
+            subs
+
+        Four ->
             Sub.none
 
 
 main : Platform.Program () Model Msg
 main =
     Platform.worker
-        { init = \() -> ( One, Cmd.none )
+        { init = \() -> ( ( One, [] ), Cmd.none )
         , update = update
         , subscriptions = subscriptions
         }
