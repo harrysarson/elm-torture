@@ -82,13 +82,14 @@ Running the following {} SSCCE{}:
                      sscce_out_dir,
                      errors,
                  }| {
-                    for (opt_level, e) in
+                    for ((elm_compiler, opt_level), e) in
                         errors.iter().filter_map(|(ol, e)| Some(ol).zip(e.as_ref()))
                     {
                         println!(
-                            "{} with opt-level of {}\n{}",
-                            suite.as_ref().display(),
-                            opt_level,
+                            "{} compiling with {} in {} optimisation mode\n{}",
+                            suite.as_ref().display().to_string().black().on_white(),
+                            elm_compiler.to_string().black().on_white(),
+                            opt_level.to_string().black().on_white(),
                             indented::indented(formatting::compile_and_run_error(
                                 e,
                                 suite,
@@ -112,15 +113,21 @@ elm-torture has run the following {} SSCCE{}:
                         let mut current_opt_level = None;
                         for suite::CompileAndRunResults { suite, errors, .. } in &suite_results {
                             use suite::CompileAndRunError;
-                            for (run_opt_level, possible_error) in errors.iter() {
+                            for (sscce_run_type, possible_error) in errors.iter() {
+                                let (compiler, run_opt_level) = sscce_run_type;
                                 let should_print = if let Some(ol) = current_opt_level {
-                                    ol == run_opt_level
-                                } else if opt_levels_of_interest.contains(run_opt_level) {
+                                    ol == sscce_run_type
+                                } else if opt_levels_of_interest.contains(sscce_run_type) {
                                     false
                                 } else {
-                                    current_opt_level = Some(run_opt_level);
-                                    opt_levels_of_interest.insert(run_opt_level);
-                                    writeln!(f, "With an opt-level of {}", run_opt_level)?;
+                                    current_opt_level = Some(sscce_run_type);
+                                    opt_levels_of_interest.insert(sscce_run_type);
+                                    writeln!(
+                                        f,
+                                        "Compiling with {} in {} optimisation mode",
+                                        compiler.to_string().black().on_white(),
+                                        run_opt_level.to_string().black().on_white(),
+                                    )?;
                                     true
                                 };
                                 if should_print {

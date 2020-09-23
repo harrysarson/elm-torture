@@ -1,14 +1,18 @@
 use super::config;
 use apply::{Also, Apply};
 use config::OptimizationLevel;
+use core::fmt;
 use io::{Read, Write};
 use log::debug;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
-use std::process::{Output, Stdio};
 use std::{collections::HashMap, fs::File};
 use std::{env, ffi::OsStr};
+use std::{
+    ffi::OsString,
+    process::{Output, Stdio},
+};
 use std::{fs, sync::Mutex};
 use std::{io, process::Command};
 use std::{
@@ -46,15 +50,59 @@ fn run_until_success<T, E>(
     f()
 }
 
-struct ElmCompilerPath(PathBuf);
+fn iter_pairs<T: Clone + Sync + Send, U: Send>(
+    into1: impl IntoParallelIterator<Item = T, Iter = impl ParallelIterator<Item = T>>,
+    into2: impl IntoParallelIterator<Item = U, Iter = impl ParallelIterator<Item = U> + Clone + Sync>,
+) -> impl IntoParallelIterator<Item = (T, U)> {
+    let it2 = into2.into_par_iter();
+    into1
+        .into_par_iter()
+        .flat_map(move |v1| it2.clone().map(move |v2| (v1.clone(), v2)))
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct ElmCompilerPath {
+    unresolved: OsString,
+    path: PathBuf,
+    pub stdlib_variant: StdlibVariant,
+}
+
+impl fmt::Display for ElmCompilerPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.unresolved.to_string_lossy())
+    }
+}
 
 impl ElmCompilerPath {
-    fn new_resolved(s: impl AsRef<OsStr>) -> Result<Self, which::Error> {
-        which::which(s).map(Self)
+    fn new_resolved(binary_name: OsString) -> Result<Self, DetectStdlibError> {
+        use bstr::ByteSlice;
+        let path = which::which(&binary_name).map_err(DetectStdlibError::LocatingCompiler)?;
+        let mut command = Command::new(&path);
+        command.arg("--stdlib-variant");
+        set_elm_home(&mut command);
+
+        debug!("Invoking compiler to detect stdlib variant: {:?}", command);
+
+        let Output { status, stdout, .. } = command.output().map_err(DetectStdlibError::Io)?;
+
+        let stdlib_variant = if status.success() {
+            if stdout.trim().starts_with(b"another-elm") {
+                Ok(StdlibVariant::Another)
+            } else {
+                Err(DetectStdlibError::Parsing(stdout.into_boxed_slice()))
+            }
+        } else {
+            Ok(StdlibVariant::Official)
+        }?;
+        Ok(Self {
+            unresolved: binary_name,
+            path,
+            stdlib_variant,
+        })
     }
 
     fn command(&self) -> Command {
-        Command::new(&self.0)
+        Command::new(&self.path)
     }
 }
 
@@ -72,7 +120,7 @@ pub struct PortName(String);
 pub struct PortArg(serde_json::Value);
 
 #[serde(rename_all = "kebab-case")]
-#[derive(Debug, Deserialize, Serialize, Eq, PartialEq, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq, Clone, Copy, Hash)]
 pub enum StdlibVariant {
     Official,
     Another,
@@ -179,6 +227,7 @@ pub enum CompileError {
 #[derive(Debug)]
 pub enum DetectStdlibError {
     Io(io::Error),
+    LocatingCompiler(which::Error),
     Parsing(Box<[u8]>),
 }
 #[derive(Debug)]
@@ -414,43 +463,19 @@ harness(generated, expectedOutput);
     Ok(())
 }
 
-fn detect_stdlib_variant(
-    elm_compiler: &ElmCompilerPath,
-) -> Result<StdlibVariant, DetectStdlibError> {
-    use bstr::ByteSlice;
-    let mut command = elm_compiler.command();
-    command.arg("--stdlib-variant");
-    set_elm_home(&mut command);
-
-    debug!("Invoking compiler to detect stdlib variant: {:?}", command);
-
-    let Output { status, stdout, .. } = command.output().map_err(DetectStdlibError::Io)?;
-
-    if status.success() {
-        if stdout.trim().starts_with(b"another-elm") {
-            Ok(StdlibVariant::Another)
-        } else {
-            Err(DetectStdlibError::Parsing(stdout.into_boxed_slice()))
-        }
-    } else {
-        Ok(StdlibVariant::Official)
-    }
-}
+pub type SscceRunType = (ElmCompilerPath, OptimizationLevel);
 
 fn compile_and_run(
     suite: impl AsRef<Path> + Sync,
     out_dir: impl AsRef<Path> + Sync,
     compiler_lock: &Mutex<()>,
-    actual_stdlib_variant: StdlibVariant,
-    elm_compiler: &ElmCompilerPath,
+    configurations: impl IntoParallelIterator<Item = SscceRunType>,
     config: &config::Config,
-) -> HashMap<OptimizationLevel, Result<(), CompileAndRunError>> {
-    config
-        .opt_levels()
-        .par_iter()
-        .copied()
-        .map(|opt_level| {
-            let get_res = || {
+) -> HashMap<SscceRunType, Result<(), CompileAndRunError>> {
+    configurations
+        .into_par_iter()
+        .map(|(elm_compiler, opt_level)| {
+            let res = (|| {
                 if !suite.as_ref().exists() {
                     return Err(CompileAndRunError::SuiteNotExist);
                 }
@@ -487,12 +512,12 @@ fn compile_and_run(
 
                 let run_failure_allowed = suite_config.run_fails_if.is_met(&RunFailsIfAllFacts {
                     opt_level,
-                    stdlib_variant: actual_stdlib_variant,
+                    stdlib_variant: elm_compiler.stdlib_variant,
                 });
 
                 debug!(
                     "Runtime failure allowed? {:?}. Config: {:?}. Actual {:?}",
-                    run_failure_allowed, &suite_config.run_fails_if, &actual_stdlib_variant
+                    run_failure_allowed, &suite_config.run_fails_if, elm_compiler.stdlib_variant
                 );
 
                 run(
@@ -512,8 +537,8 @@ fn compile_and_run(
                 }
 
                 Ok(())
-            };
-            (opt_level, get_res())
+            })();
+            ((elm_compiler, opt_level), res)
         })
         .collect()
 }
@@ -523,12 +548,13 @@ pub struct CompileAndRunResults<Ps> {
     // TODO(harry): move into RunError!
     pub sscce_out_dir: PathBuf,
     /// None indicates that elm-torture ran SSCCE successfully.
-    pub errors: HashMap<OptimizationLevel, Option<CompileAndRunError>>,
+    pub errors: HashMap<SscceRunType, Option<CompileAndRunError>>,
 }
 
 pub enum SuitesError {
-    CompilerNotFound(which::Error),
-    CannotDetectStdlibVariant(DetectStdlibError),
+    ResolvingCompiler(DetectStdlibError),
+    // CompilerNotFound(which::Error),
+    // CannotDetectStdlibVariant(DetectStdlibError),
 }
 
 #[allow(clippy::too_many_lines)]
@@ -554,10 +580,13 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
     let compiler_lock = Mutex::new(());
     let prev_runs_failed = AtomicBool::new(false);
 
-    let elm_compiler = ElmCompilerPath::new_resolved(instructions.config.elm_compiler())
-        .map_err(SuitesError::CompilerNotFound)?;
-    let actual_stdlib_variant =
-        detect_stdlib_variant(&elm_compiler).map_err(SuitesError::CannotDetectStdlibVariant)?;
+    let elm_compilers = instructions
+        .config
+        .elm_compilers()
+        .iter()
+        .map(|s| ElmCompilerPath::new_resolved(s.to_os_string()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(SuitesError::ResolvingCompiler)?;
 
     let scanner = move |suite: Ps| {
         if instructions.fail_fast && prev_runs_failed.load(Ordering::Relaxed) {
@@ -575,7 +604,10 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
                     sscce_out_dir,
                     errors: HashMap::new().also(|hm| {
                         hm.insert(
-                            instructions.config.opt_levels()[0],
+                            (
+                                elm_compilers[0].clone(),
+                                instructions.config.opt_levels()[0],
+                            ),
                             Some(CompileAndRunError::OutDirIsNotDir),
                         );
                     }),
@@ -586,8 +618,10 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
                 &suite,
                 &sscce_out_dir,
                 &compiler_lock,
-                actual_stdlib_variant,
-                &elm_compiler,
+                iter_pairs(
+                    elm_compilers.clone(),
+                    instructions.config.opt_levels().par_iter().copied(),
+                ),
                 &instructions.config,
             )
             .into_iter()
