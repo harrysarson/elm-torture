@@ -305,13 +305,9 @@ pub fn collect_and_print<T: Send>(
 pub fn suites_error<'a>(err: &'a suite::SuitesError) -> impl fmt::Display + 'a {
     use suite::SuitesError;
     easy_format(move |_| match err {
-        suite::SuitesError::CompilerNotFound(e) => {
-            panic!("Could not find the elm compiler {:?}", e)
-        }
-
-        SuitesError::CannotDetectStdlibVariant(e) => {
-            panic!("Failed to detect stdlib variant due to error: {:?}", e)
-        }
+        SuitesError::ResolvingCompiler(e) => panic!("Could not resolve the elm compiler {:?}", e), // SuitesError::CannotDetectStdlibVariant(e) => {
+                                                                                                   //     panic!("Failed to detect stdlib variant due to error: {:?}", e)
+                                                                                                   // }
     })
 }
 

@@ -1,8 +1,8 @@
 use clap::Clap;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::string::String;
 use std::time::Duration;
+use std::{ffi::OsString, str::FromStr};
 use std::{fmt, path::PathBuf};
 
 #[derive(Debug, Deserialize, Serialize, Clap, PartialEq, Eq, Clone, Copy, Hash)]
@@ -48,8 +48,13 @@ impl fmt::Display for OptimizationLevel {
 #[derive(Debug, Default, Deserialize, Serialize, Clap)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    #[clap(long, about = "Path to elm compiler.")]
-    elm_compiler: Option<String>,
+    #[clap(
+        long,
+        multiple(false),
+        use_delimiter(true),
+        about = "Path to elm compiler."
+    )]
+    elm_compilers: Option<Vec<OsString>>,
     #[clap(long, about = "Path to node.")]
     node: Option<String>,
     #[clap(
@@ -95,7 +100,7 @@ impl Config {
         }
 
         Config {
-            elm_compiler: merge!(elm_compiler),
+            elm_compilers: merge!(elm_compilers),
             node: merge!(node),
             opt_levels: merge!(opt_levels),
             compiler_max_retries: merge!(compiler_max_retries),
@@ -104,10 +109,11 @@ impl Config {
         }
     }
 
-    pub fn elm_compiler(&self) -> &str {
-        self.elm_compiler
-            .as_ref()
-            .map_or_else(|| "elm", String::as_str)
+    pub fn elm_compilers(&self) -> &Vec<OsString> {
+        lazy_static::lazy_static! {
+            static ref ELM: Vec<OsString> = vec![OsString::from("elm")];
+        }
+        &self.elm_compilers.as_ref().unwrap_or(&*ELM)
     }
 
     pub fn node(&self) -> &str {
