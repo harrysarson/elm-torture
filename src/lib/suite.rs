@@ -1,6 +1,6 @@
 use super::config;
 use apply::{Also, Apply};
-use config::OptimisationLevel;
+use config::OptimizationLevel;
 use io::{Read, Write};
 use log::debug;
 use rayon::prelude::*;
@@ -87,13 +87,13 @@ pub enum StdlibVariant {
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct RunFailsIfAll {
     stdlib_variant: AnyOneOf<StdlibVariant>,
-    opt_level: AnyOneOf<config::OptimisationLevel>,
+    opt_level: AnyOneOf<config::OptimizationLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct CompileFailsIfAll {
-    opt_level: AnyOneOf<config::OptimisationLevel>,
+    opt_level: AnyOneOf<config::OptimizationLevel>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -134,7 +134,7 @@ impl<C: Condition> Condition for Option<C> {
 }
 
 struct RunFailsIfAllFacts {
-    opt_level: config::OptimisationLevel,
+    opt_level: config::OptimizationLevel,
     stdlib_variant: StdlibVariant,
 }
 
@@ -148,7 +148,7 @@ impl Condition for RunFailsIfAll {
     }
 }
 struct CompileFailsIfAllFacts {
-    opt_level: config::OptimisationLevel,
+    opt_level: config::OptimizationLevel,
 }
 
 impl Condition for CompileFailsIfAll {
@@ -243,7 +243,7 @@ fn compile(
     suite: &Path,
     out_file: impl AsRef<Path>,
     compiler_lock: &Mutex<()>,
-    opt_level: OptimisationLevel,
+    opt_level: OptimizationLevel,
     config: &config::Config,
 ) -> Result<(), CompileError> {
     fn compile_help(
@@ -320,7 +320,7 @@ fn get_suite_config(suite: impl AsRef<Path>) -> Result<Config, GetSuiteConfigErr
 fn run(
     suite: &Path,
     out_dir: &Path,
-    opt_level: OptimisationLevel,
+    opt_level: OptimizationLevel,
     config: &config::Config,
     suite_config: &Config,
 ) -> Result<(), RunError> {
@@ -457,7 +457,7 @@ fn compile_and_run(
     out_dir: impl AsRef<Path> + Sync,
     compiler_lock: &Mutex<()>,
     instructions: &super::cli::Instructions,
-) -> HashMap<OptimisationLevel, Result<(), CompileAndRunError>> {
+) -> HashMap<OptimizationLevel, Result<(), CompileAndRunError>> {
     instructions
         .config
         .opt_levels()
@@ -540,7 +540,7 @@ pub struct CompileAndRunResults<Ps> {
     // TODO(harry): move into RunError!
     pub sscce_out_dir: PathBuf,
     /// None indicates that elm-torture ran SSCCE successfully.
-    pub errors: HashMap<OptimisationLevel, Option<CompileAndRunError>>,
+    pub errors: HashMap<OptimizationLevel, Option<CompileAndRunError>>,
 }
 
 pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(

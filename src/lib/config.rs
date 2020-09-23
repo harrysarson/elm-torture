@@ -5,42 +5,41 @@ use std::string::String;
 use std::time::Duration;
 use std::{fmt, path::PathBuf};
 
-// TODO(harry): fix spelling
 #[derive(Debug, Deserialize, Serialize, Clap, PartialEq, Eq, Clone, Copy, Hash)]
 #[serde(rename_all = "kebab-case")]
-pub enum OptimisationLevel {
+pub enum OptimizationLevel {
     Debug,
     Dev,
     Optimize,
 }
 
-impl OptimisationLevel {
+impl OptimizationLevel {
     pub fn args(self) -> &'static [&'static str] {
         match self {
-            OptimisationLevel::Debug => &["--debug"],
-            OptimisationLevel::Dev => &[],
-            OptimisationLevel::Optimize => &["--optimize"],
+            OptimizationLevel::Debug => &["--debug"],
+            OptimizationLevel::Dev => &[],
+            OptimizationLevel::Optimize => &["--optimize"],
         }
     }
 
     pub fn id(self) -> &'static str {
         match self {
-            OptimisationLevel::Debug => &"debug",
-            OptimisationLevel::Dev => &"dev",
-            OptimisationLevel::Optimize => &"optimize",
+            OptimizationLevel::Debug => &"debug",
+            OptimizationLevel::Dev => &"dev",
+            OptimizationLevel::Optimize => &"optimize",
         }
     }
 }
 
-impl fmt::Display for OptimisationLevel {
+impl fmt::Display for OptimizationLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}",
             match self {
-                OptimisationLevel::Debug => &"debug",
-                OptimisationLevel::Dev => &"dev (default)",
-                OptimisationLevel::Optimize => &"optimize",
+                OptimizationLevel::Debug => &"debug",
+                OptimizationLevel::Dev => &"dev (default)",
+                OptimizationLevel::Optimize => &"optimize",
             }
         )
     }
@@ -60,7 +59,7 @@ pub struct Config {
         use_delimiter(true),
         about = "Optimization level to use when compiling SSCCEs."
     )]
-    opt_levels: Option<Vec<OptimisationLevel>>,
+    opt_levels: Option<Vec<OptimizationLevel>>,
     #[clap(
         long,
         value_name = "N",
@@ -115,11 +114,11 @@ impl Config {
         self.node.as_ref().map_or_else(|| "node", String::as_str)
     }
 
-    pub fn opt_levels(&self) -> &[OptimisationLevel] {
+    pub fn opt_levels(&self) -> &[OptimizationLevel] {
         if let Some(levels) = &self.opt_levels {
             &levels
         } else {
-            &[OptimisationLevel::Dev]
+            &[OptimizationLevel::Dev]
         }
     }
 
@@ -135,7 +134,7 @@ impl Config {
 #[derive(Debug)]
 pub struct InvalidOptimizationLevel(String);
 
-impl FromStr for OptimisationLevel {
+impl FromStr for OptimizationLevel {
     type Err = InvalidOptimizationLevel;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -150,6 +149,6 @@ impl FromStr for OptimisationLevel {
 
 impl fmt::Display for InvalidOptimizationLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Invalid optimisation level: {}", self.0)
+        write!(f, "Invalid optimization level: {}", self.0)
     }
 }
