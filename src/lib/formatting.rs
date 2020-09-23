@@ -1,14 +1,12 @@
 #![allow(clippy::enum_glob_use)]
 
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-
 use super::find_suites;
 use super::suite;
 use super::suite::CompileAndRunError;
 use super::suite::GetSuiteConfigError;
 use std::fmt;
+use std::path::Path;
 use std::process;
-use std::{mem, path::Path};
 
 pub fn easy_format<F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result>(func: F) -> impl fmt::Display {
     struct Formatable<F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result> {
@@ -263,42 +261,6 @@ pub fn find_suite_error<'a>(
             ),
             ReadingDir(e) => Err(e).unwrap(),
         }
-    })
-}
-
-pub fn collect_and_print<T: Send>(
-    iter: impl IntoParallelIterator<Item = T> + Send,
-    indexer: impl Fn(&T) -> usize + Send + Sync,
-    printer: impl Fn(&T) + Send + Sync,
-) -> Vec<T> {
-    let (res_send, res_recv) = crossbeam_channel::unbounded();
-    rayon::scope(|s| {
-        s.spawn(|_| {
-            iter.into_par_iter().for_each(|v| res_send.send(v).unwrap());
-            drop(res_send);
-        });
-
-        let mut suite_results: Vec<Option<T>> = vec![];
-        let mut print_index = 0;
-        while let Ok(res) = res_recv.recv() {
-            let position = indexer(&res);
-            if position >= suite_results.len() {
-                suite_results.resize_with(position + 1, || None)
-            }
-            let old_value = mem::replace(&mut suite_results[position], Some(res));
-            assert!(old_value.is_none());
-            let maybe_printable = &suite_results[print_index];
-            let print_done = if let Some(t) = maybe_printable {
-                printer(&t);
-                true
-            } else {
-                false
-            };
-            if print_done {
-                print_index += 1;
-            }
-        }
-        suite_results.into_iter().map(Option::unwrap).collect()
     })
 }
 

@@ -20,5 +20,8 @@
             "write",
             "2"
         ]
-    ]
+    ],
+    "run-fails-if": {
+        "platform": ["macos"]
+    }
 }
