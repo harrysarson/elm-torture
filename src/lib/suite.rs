@@ -122,18 +122,27 @@ pub enum StdlibVariant {
     Official,
     Another,
 }
+#[serde(rename_all = "lowercase")]
+#[derive(Debug, Deserialize, Serialize, Eq, PartialEq, Clone, Copy, Hash)]
+pub enum Platform {
+    Linux,
+    MacOs,
+    Windows,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct RunFailsIfAll {
     stdlib_variant: AnyOneOf<StdlibVariant>,
     opt_level: AnyOneOf<config::OptimizationLevel>,
+    platform: AnyOneOf<Platform>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct CompileFailsIfAll {
     opt_level: AnyOneOf<config::OptimizationLevel>,
+    platform: AnyOneOf<Platform>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -176,6 +185,7 @@ impl<C: Condition> Condition for Option<C> {
 struct RunFailsIfAllFacts {
     opt_level: config::OptimizationLevel,
     stdlib_variant: StdlibVariant,
+    platform: Platform,
 }
 
 impl Condition for RunFailsIfAll {
@@ -185,16 +195,19 @@ impl Condition for RunFailsIfAll {
             && self
                 .stdlib_variant
                 .any(|variant| *variant == f.stdlib_variant)
+            && self.platform.any(|platform| *platform == f.platform)
     }
 }
 struct CompileFailsIfAllFacts {
     opt_level: config::OptimizationLevel,
+    platform: Platform,
 }
 
 impl Condition for CompileFailsIfAll {
     type Facts = CompileFailsIfAllFacts;
     fn is_met(&self, f: &Self::Facts) -> bool {
         self.opt_level.any(|level| *level == f.opt_level)
+            && self.platform.any(|platform| *platform == f.platform)
     }
 }
 
@@ -469,6 +482,12 @@ fn compile_and_run(
     configurations: impl IntoParallelIterator<Item = SscceRunType>,
     config: &config::Config,
 ) -> HashMap<SscceRunType, Result<(), CompileAndRunError>> {
+    let platform = match env::consts::OS {
+        "linux" => Platform::Linux,
+        "macos" => Platform::MacOs,
+        "windows" => Platform::Windows,
+        _ => panic!("Unsupported platform. (Add it to Platform enum!)"),
+    };
     configurations
         .into_par_iter()
         .map(|(elm_compiler, opt_level)| {
@@ -486,9 +505,13 @@ fn compile_and_run(
                 let suite_config =
                     get_suite_config(&suite).map_err(CompileAndRunError::CannotGetSuiteConfig)?;
 
-                let compile_failure_allowed = suite_config
-                    .compile_fails_if
-                    .is_met(&CompileFailsIfAllFacts { opt_level });
+                let compile_failure_allowed =
+                    suite_config
+                        .compile_fails_if
+                        .is_met(&CompileFailsIfAllFacts {
+                            opt_level,
+                            platform,
+                        });
 
                 compile(
                     suite.as_ref(),
@@ -510,6 +533,7 @@ fn compile_and_run(
                 let run_failure_allowed = suite_config.run_fails_if.is_met(&RunFailsIfAllFacts {
                     opt_level,
                     stdlib_variant: elm_compiler.stdlib_variant,
+                    platform,
                 });
 
                 debug!(
