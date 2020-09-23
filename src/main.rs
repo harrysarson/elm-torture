@@ -97,16 +97,10 @@ Running the following {} SSCCE{}:
 
     match suite::compile_and_run_suites(suites.par_iter(), instructions) {
         Ok(res_iter) => {
-            let suite_results = formatting::collect_and_print(
-                res_iter,
-                |suite::CompileAndRunResults { suite, .. }| {
-                    suites
-                        .iter()
-                        .position(|s| s.as_ref() == suite.as_ref())
-                        .unwrap()
-                },
-                sscce_result_printer,
-            );
+            let suite_results: Vec<_> = res_iter
+                .into_par_iter()
+                .inspect(sscce_result_printer)
+                .collect();
 
             println!(
                 "
