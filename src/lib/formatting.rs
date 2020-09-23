@@ -66,11 +66,6 @@ fn compiler_error<'a>(
     easy_format(move |f| {
         use suite::CompileError::*;
         match err {
-            CompilerNotFound(err) => write!(
-                f,
-                "Could not find elm compiler executable! Details:\n{}",
-                err
-            ),
             ReadingTargets(err) => write!(
                 f,
                 "targets.txt found in suite {} but could not be read!. Details:\n{}",
