@@ -4,51 +4,48 @@
 
 mod lib;
 
-use apply::Apply;
 use colored::Colorize;
 use lib::cli;
 use lib::formatting;
-use lib::suite::compile_and_run_suites;
-use lib::suite::CompileAndRunError;
-use rayon::{iter, prelude::*};
-use std::{fs, process};
+use lib::suite;
+use rayon::prelude::*;
+use std::{collections::HashSet, fs, process};
 use std::{num::NonZeroI32, path::Path};
 
 const WELCOME_MESSAGE: &str = "Elm Torture - stress tests for an elm compiler";
 
 #[allow(clippy::enum_glob_use)]
-fn get_exit_code(suite_result: &Result<(), CompileAndRunError>) -> i32 {
-    use CompileAndRunError::*;
+fn get_exit_code(err: &suite::CompileAndRunError) -> i32 {
+    use suite::CompileAndRunError::*;
 
-    match suite_result {
-        Err(ref compile_and_run_error) => match compile_and_run_error {
-            CannotDetectStdlibVariant(_)
-            | SuiteNotExist
-            | SuiteNotDir
-            | SuiteNotElm
-            | CannotGetSuiteConfig(_) => 0x28,
+    match err {
+        CannotDetectStdlibVariant(_)
+        | SuiteNotExist
+        | SuiteNotDir
+        | SuiteNotElm
+        | OutDirIsNotDir
+        | CannotGetSuiteConfig(_) => 0x28,
 
-            CompileFailure { allowed, .. } => {
-                if *allowed {
-                    0
-                } else {
-                    0x21
-                }
+        CompileFailure { allowed, .. } => {
+            if *allowed {
+                0
+            } else {
+                0x21
             }
+        }
 
-            RunFailure { allowed, .. } => {
-                if *allowed {
-                    0
-                } else {
-                    0x22
-                }
+        RunFailure { allowed, .. } => {
+            if *allowed {
+                0
+            } else {
+                0x22
             }
-            ExpectedCompileFailure | ExpectedRunFailure => 0x24,
-        },
-        Ok(()) => 0,
+        }
+        ExpectedCompileFailure | ExpectedRunFailure => 0x24,
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_suites(
     suites: &[impl AsRef<Path> + Sync],
     instructions: &cli::Instructions,
@@ -72,23 +69,24 @@ Running the following {} SSCCE{}:
     );
 
     let suite_results = formatting::collect_and_print(
-        compile_and_run_suites(suites.par_iter(), instructions),
-        |(suite, ..)| {
+        suite::compile_and_run_suites(suites.par_iter(), instructions),
+        |suite::CompileAndRunResults { suite, .. }| {
             suites
                 .iter()
                 .position(|s| s.as_ref() == suite.as_ref())
                 .unwrap()
         },
-        |(suite, out_dir, result)| {
-            if let Err(e) = result {
+        |suite::CompileAndRunResults {
+             suite,
+             sscce_out_dir,
+             errors,
+         }| {
+            for (opt_level, e) in errors.iter().filter_map(|(ol, e)| Some(ol).zip(e.as_ref())) {
                 println!(
-                    "{}",
-                    indented::indented(formatting::compile_and_run_error(
-                        e,
-                        suite,
-                        &out_dir,
-                        instructions.config.out_dir.as_ref(),
-                    ))
+                    "{} with opt-level of {}\n{}",
+                    suite.as_ref().display(),
+                    opt_level,
+                    indented::indented(formatting::compile_and_run_error(e, suite, &sscce_out_dir))
                 );
             }
         },
@@ -102,31 +100,60 @@ elm-torture has run the following {} SSCCE{}:
         suites.len(),
         if suites.len() == 1 { "" } else { "s" },
         indented::indented(formatting::easy_format(|f| {
-            for (suite, _, result) in &suite_results {
-                writeln!(
-                    f,
-                    "{} ({})",
-                    suite.as_ref().display(),
-                    match result {
-                        Err(CompileAndRunError::RunFailure { allowed: true, .. }) =>
-                            "allowed run failure".yellow(),
-                        Err(CompileAndRunError::CompileFailure { allowed: true, .. }) =>
-                            "allowed compile failure".yellow(),
-                        Err(CompileAndRunError::ExpectedCompileFailure) =>
-                            "success when elm-torture expected a compile time failure".red(),
-                        Err(CompileAndRunError::ExpectedRunFailure) =>
-                            "success when elm-torture expected a run time failure".red(),
-                        Err(_) => "failure".red(),
-                        Ok(_) => "success".green(),
+            let mut opt_levels_of_interest = HashSet::new();
+            loop {
+                let mut current_opt_level = None;
+                for suite::CompileAndRunResults { suite, errors, .. } in &suite_results {
+                    use suite::CompileAndRunError;
+                    for (run_opt_level, possible_error) in errors.iter() {
+                        let should_print = if let Some(ol) = current_opt_level {
+                            ol == run_opt_level
+                        } else if opt_levels_of_interest.contains(run_opt_level) {
+                            false
+                        } else {
+                            current_opt_level = Some(run_opt_level);
+                            opt_levels_of_interest.insert(run_opt_level);
+                            writeln!(f, "With an opt-level of {}", run_opt_level)?;
+                            true
+                        };
+                        if should_print {
+                            writeln_indented!(
+                                f,
+                                "{} ({})",
+                                suite.as_ref().display(),
+                                match possible_error {
+                                    Some(CompileAndRunError::RunFailure {
+                                        allowed: true, ..
+                                    }) => "allowed run failure".yellow(),
+                                    Some(CompileAndRunError::CompileFailure {
+                                        allowed: true,
+                                        ..
+                                    }) => "allowed compile failure".yellow(),
+                                    Some(CompileAndRunError::ExpectedCompileFailure) =>
+                                        "success when elm-torture expected a compile time failure"
+                                            .red(),
+                                    Some(CompileAndRunError::ExpectedRunFailure) =>
+                                        "success when elm-torture expected a run time failure".red(),
+                                    Some(_) => "failure".red(),
+                                    None => "success".green(),
+                                }
+                            )?
+                        }
                     }
-                )?
+                }
+                if current_opt_level.is_none() {
+                    break;
+                }
             }
             Ok(())
         }))
     );
     let code = suite_results
         .iter()
-        .fold(0, |code, (_, _, res)| code | get_exit_code(res));
+        .flat_map(|suite::CompileAndRunResults { errors, .. }| {
+            errors.iter().filter_map(|(_, e)| e.as_ref())
+        })
+        .fold(0, |code, error| code | get_exit_code(error));
     NonZeroI32::new(code)
 }
 
@@ -137,39 +164,6 @@ fn run_app(instructions: cli::Instructions) -> Option<NonZeroI32> {
             serde_json::to_writer_pretty(file, &instructions.config.serialize())
                 .expect("could not serialize config");
             None
-        }
-        cli::Task::RunSuite { ref suite } => {
-            print!(
-                "{}
-
-Running SSCCE {}:",
-                WELCOME_MESSAGE,
-                suite.display()
-            );
-            let (suite2, sscce_out_dir, suite_result) =
-                compile_and_run_suites(iter::once(suite), &instructions)
-                    .into_par_iter()
-                    .collect::<Vec<_>>()
-                    .apply(|mut v| {
-                        assert!(v.len() == 1);
-                        v.pop().unwrap()
-                    });
-            assert!(suite2 == suite);
-            match suite_result {
-                Ok(()) => println!(" Success"),
-                Err(ref e) => {
-                    println!(
-                        "\n\n{}",
-                        formatting::compile_and_run_error(
-                            e,
-                            suite,
-                            sscce_out_dir,
-                            instructions.config.out_dir.as_ref()
-                        )
-                    );
-                }
-            }
-            NonZeroI32::new(get_exit_code(&suite_result))
         }
         cli::Task::RunSuites(ref suite_dir) => match lib::find_suites::find_suites(&suite_dir) {
             Ok(suites) => run_suites(&suites, &instructions),

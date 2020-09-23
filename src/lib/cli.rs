@@ -7,8 +7,7 @@ use std::{fs::File, path::Path};
 #[clap(
     version = "0.0.2",
     author = "Harry Sarson <harry.sarson@hotmail.co.uk>",
-    about = "Test suite for an elm compiler",
-    group=clap::ArgGroup::new("suite_or_suites").required(true)
+    about = "Test suite for an elm compiler"
 )]
 struct Opts {
     #[clap(short, long = "config", about = "Set config file", parse(try_from_os_str = read_config_file))]
@@ -20,18 +19,9 @@ struct Opts {
     #[clap(
         long,
         value_name = "DIRECTORY",
-        about = "The suite to test",
-        group = "suite_or_suites"
+        about = "A directory containing suites to test"
     )]
-    suite: Option<PathBuf>,
-
-    #[clap(
-        long,
-        value_name = "DIRECTORY",
-        about = "A directory containing suites to test",
-        group = "suite_or_suites"
-    )]
-    suites: Option<PathBuf>,
+    suites: PathBuf,
 
     #[clap(long, value_name = "FILE", about = "Dump the configuration to FILE.")]
     show_config: Option<PathBuf>,
@@ -42,7 +32,6 @@ struct Opts {
 
 pub enum Task {
     DumpConfig(PathBuf),
-    RunSuite { suite: PathBuf },
     RunSuites(PathBuf),
 }
 
@@ -71,7 +60,6 @@ fn read_config_file(config_path: &OsStr) -> Result<config::Config, String> {
 
 pub fn get_cli_task() -> Instructions {
     let Opts {
-        suite,
         suites,
         config_from_file,
         fail_fast,
@@ -89,16 +77,6 @@ pub fn get_cli_task() -> Instructions {
     Instructions {
         config,
         fail_fast,
-        task: show_config.map_or_else(
-            || {
-                suites.map_or_else(
-                    || Task::RunSuite {
-                        suite: suite.unwrap(),
-                    },
-                    Task::RunSuites,
-                )
-            },
-            Task::DumpConfig,
-        ),
+        task: show_config.map_or_else(|| Task::RunSuites(suites), Task::DumpConfig),
     }
 }

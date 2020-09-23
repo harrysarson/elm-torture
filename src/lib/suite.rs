@@ -1,12 +1,13 @@
 use super::config;
-use apply::Apply;
+use apply::{Also, Apply};
+use config::OptimisationLevel;
 use io::{Read, Write};
 use log::debug;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
-use std::fs::File;
 use std::process::{Output, Stdio};
+use std::{collections::HashMap, fs::File};
 use std::{env, ffi::OsStr};
 use std::{fs, sync::Mutex};
 use std::{io, process::Command};
@@ -179,7 +180,6 @@ pub enum CompileError {
     ReadingTargets(io::Error),
     DeletingElmStuff(io::Error),
     SuiteDoesNotExist,
-    OutDirIsNotDir,
 }
 
 #[derive(Debug)]
@@ -218,6 +218,7 @@ pub enum CompileAndRunError {
     SuiteNotExist,
     SuiteNotDir,
     SuiteNotElm,
+    OutDirIsNotDir,
     CannotGetSuiteConfig(GetSuiteConfigError),
     CompileFailure {
         allowed: bool,
@@ -240,11 +241,15 @@ fn set_elm_home(command: &mut Command) {
 
 fn compile(
     suite: &Path,
-    out_dir: impl AsRef<Path>,
+    out_file: impl AsRef<Path>,
     compiler_lock: &Mutex<()>,
+    opt_level: OptimisationLevel,
     config: &config::Config,
 ) -> Result<(), CompileError> {
-    fn compile(suite: impl AsRef<Path>, command: &mut Command) -> Result<Output, CompileError> {
+    fn compile_help(
+        suite: impl AsRef<Path>,
+        command: &mut Command,
+    ) -> Result<Output, CompileError> {
         fs::remove_dir_all(suite.as_ref().join("elm-stuff"))
             .or_else(|e| {
                 if e.kind() == io::ErrorKind::NotFound {
@@ -257,11 +262,6 @@ fn compile(
         command.output().map_err(CompileError::Process)
     };
 
-    if !out_dir.as_ref().exists() {
-        let _ = fs::create_dir(&out_dir);
-    } else if !out_dir.as_ref().is_dir() {
-        return Err(CompileError::OutDirIsNotDir);
-    }
     if !suite.join("elm.json").exists() {
         return Err(CompileError::SuiteDoesNotExist);
     }
@@ -281,20 +281,20 @@ fn compile(
     command.current_dir(suite);
     command.arg("make");
     command.args(root_files);
-    command.args(config.args().iter());
+    command.args(opt_level.args().iter());
     command.arg("--output");
     set_elm_home(&mut command);
-    command.arg(
-        fs::canonicalize(&out_dir)
-            .map_err(CompileError::Process)?
-            .join("elm.js"),
-    );
+    command.arg(out_file.as_ref());
+    //     fs::canonicalize(&out_dir)
+    //         .map_err(CompileError::Process)?
+    //         .join("elm.js"),
+    // );
 
     debug!("Invoking compiler: {:?}", command);
 
     let res = run_until_success(config.compiler_max_retries(), || {
         let _lock = compiler_lock.lock();
-        compile(&suite, &mut command)
+        compile_help(&suite, &mut command)
     })?;
 
     if !res.status.success() {
@@ -320,6 +320,7 @@ fn get_suite_config(suite: impl AsRef<Path>) -> Result<Config, GetSuiteConfigErr
 fn run(
     suite: &Path,
     out_dir: &Path,
+    opt_level: OptimisationLevel,
     config: &config::Config,
     suite_config: &Config,
 ) -> Result<(), RunError> {
@@ -352,15 +353,19 @@ fn run(
 
     File::create(&main_file)
         .map_err(RunError::WritingHarness)?
-        .write_all(
-            br#"
+        .apply(|mut f| {
+            write!(
+                f,
+                r#"
 const harness = require('./harness.js');
-const generated = require('./elm.js');
+const generated = require('./elm-{}.js');
 const expectedOutput = require('./output.json');
 
 harness(generated, expectedOutput);
 "#,
-        )
+                opt_level.id()
+            )
+        })
         .map_err(RunError::WritingHarness)?;
 
     let mut runner_child = Command::new(node_exe)
@@ -447,81 +452,101 @@ fn detect_stdlib_variant(
     }
 }
 
-fn compile_and_run<Ps: AsRef<Path>, Pe: AsRef<Path>>(
-    suite: Ps,
-    out_dir: Pe,
+fn compile_and_run(
+    suite: impl AsRef<Path> + Sync,
+    out_dir: impl AsRef<Path> + Sync,
     compiler_lock: &Mutex<()>,
     instructions: &super::cli::Instructions,
-) -> Result<(), CompileAndRunError> {
-    if !suite.as_ref().exists() {
-        return Err(CompileAndRunError::SuiteNotExist);
-    }
-    if !suite.as_ref().is_dir() {
-        return Err(CompileAndRunError::SuiteNotDir);
-    }
-    if !suite.as_ref().join("elm.json").exists() {
-        return Err(CompileAndRunError::SuiteNotElm);
-    }
+) -> HashMap<OptimisationLevel, Result<(), CompileAndRunError>> {
+    instructions
+        .config
+        .opt_levels()
+        .par_iter()
+        .copied()
+        .map(|opt_level| {
+            let get_res = || {
+                if !suite.as_ref().exists() {
+                    return Err(CompileAndRunError::SuiteNotExist);
+                }
+                if !suite.as_ref().is_dir() {
+                    return Err(CompileAndRunError::SuiteNotDir);
+                }
+                if !suite.as_ref().join("elm.json").exists() {
+                    return Err(CompileAndRunError::SuiteNotElm);
+                }
 
-    let suite_config =
-        get_suite_config(&suite).map_err(CompileAndRunError::CannotGetSuiteConfig)?;
+                let suite_config =
+                    get_suite_config(&suite).map_err(CompileAndRunError::CannotGetSuiteConfig)?;
 
-    let compile_failure_allowed = suite_config
-        .compile_fails_if
-        .is_met(&CompileFailsIfAllFacts {
-            opt_level: instructions.config.opt_level(),
-        });
+                let compile_failure_allowed = suite_config
+                    .compile_fails_if
+                    .is_met(&CompileFailsIfAllFacts { opt_level });
 
-    compile(
-        suite.as_ref(),
-        &out_dir,
-        &compiler_lock,
-        &instructions.config,
-    )
-    .map_err(|e| CompileAndRunError::CompileFailure {
-        allowed: compile_failure_allowed,
-        reason: e,
-    })?;
+                compile(
+                    suite.as_ref(),
+                    out_dir.as_ref().join(format!("elm-{}.js", opt_level.id())),
+                    &compiler_lock,
+                    opt_level,
+                    &instructions.config,
+                )
+                .map_err(|e| CompileAndRunError::CompileFailure {
+                    allowed: compile_failure_allowed,
+                    reason: e,
+                })?;
 
-    if compile_failure_allowed {
-        return Err(CompileAndRunError::ExpectedCompileFailure);
-    }
+                if compile_failure_allowed {
+                    return Err(CompileAndRunError::ExpectedCompileFailure);
+                }
 
-    let actual_stdlib_variant = detect_stdlib_variant(instructions.config.elm_compiler())
-        .map_err(CompileAndRunError::CannotDetectStdlibVariant)?;
+                let actual_stdlib_variant =
+                    detect_stdlib_variant(instructions.config.elm_compiler())
+                        .map_err(CompileAndRunError::CannotDetectStdlibVariant)?;
 
-    let run_failure_allowed = suite_config.run_fails_if.is_met(&RunFailsIfAllFacts {
-        opt_level: instructions.config.opt_level(),
-        stdlib_variant: actual_stdlib_variant,
-    });
+                let run_failure_allowed = suite_config.run_fails_if.is_met(&RunFailsIfAllFacts {
+                    opt_level,
+                    stdlib_variant: actual_stdlib_variant,
+                });
 
-    debug!(
-        "Runtime failure allowed? {:?}. Config: {:?}. Actual {:?}",
-        run_failure_allowed, &suite_config.run_fails_if, &actual_stdlib_variant
-    );
+                debug!(
+                    "Runtime failure allowed? {:?}. Config: {:?}. Actual {:?}",
+                    run_failure_allowed, &suite_config.run_fails_if, &actual_stdlib_variant
+                );
 
-    run(
-        suite.as_ref(),
-        out_dir.as_ref(),
-        &instructions.config,
-        &suite_config,
-    )
-    .map_err(|e| CompileAndRunError::RunFailure {
-        allowed: run_failure_allowed,
-        reason: e,
-    })?;
+                run(
+                    suite.as_ref(),
+                    out_dir.as_ref(),
+                    opt_level,
+                    &instructions.config,
+                    &suite_config,
+                )
+                .map_err(|e| CompileAndRunError::RunFailure {
+                    allowed: run_failure_allowed,
+                    reason: e,
+                })?;
 
-    if run_failure_allowed {
-        return Err(CompileAndRunError::ExpectedRunFailure);
-    }
+                if run_failure_allowed {
+                    return Err(CompileAndRunError::ExpectedRunFailure);
+                }
 
-    Ok(())
+                Ok(())
+            };
+            (opt_level, get_res())
+        })
+        .collect()
 }
-/**/
-pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + 'a>(
+
+pub struct CompileAndRunResults<Ps> {
+    pub suite: Ps,
+    // TODO(harry): move into RunError!
+    pub sscce_out_dir: PathBuf,
+    /// None indicates that elm-torture ran SSCCE successfully.
+    pub errors: HashMap<OptimisationLevel, Option<CompileAndRunError>>,
+}
+
+pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
     suites: impl IntoParallelIterator<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
-) -> impl IntoParallelIterator<Item = (Ps, PathBuf, Result<(), CompileAndRunError>)> + 'a {
+) -> impl IntoParallelIterator<Item = CompileAndRunResults<Ps>> + 'a {
     let (tmp_dir_raw, out_dir) = if let Some(out_dir) = &instructions.config.out_dir {
         (None, out_dir.to_path_buf())
     } else {
@@ -533,31 +558,60 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + 'a>(
         (Some(td), pb)
     };
     let tmp_dir = Mutex::new(tmp_dir_raw);
+
+    if !out_dir.exists() {
+        let _ = fs::create_dir(&out_dir);
+    }
     let compiler_lock = Mutex::new(());
     let prev_runs_failed = AtomicBool::new(false);
-    let scanner = move |suite: Ps| -> Option<(Ps, PathBuf, Result<(), CompileAndRunError>)> {
+    let scanner = move |suite: Ps| {
         if instructions.fail_fast && prev_runs_failed.load(Ordering::Relaxed) {
             None
         } else {
             let sscce_out_dir = out_dir.join(suite.as_ref().file_name().expect("todo"));
-            let res: Result<(), CompileAndRunError> =
-                compile_and_run(&suite, &sscce_out_dir, &compiler_lock, instructions);
-            if let Err(CompileAndRunError::RunFailure { .. }) = res {
-                if let Some(dir) = tmp_dir.lock().unwrap().take() {
-                    dir.into_path();
-                }
-            } else {
-                let _ = fs::remove_dir_all(&sscce_out_dir);
+
+            if !sscce_out_dir.exists() {
+                let _ = fs::create_dir(&sscce_out_dir);
             }
-            let failed = match res {
-                Err(CompileAndRunError::CompileFailure { allowed: true, .. })
-                | Err(CompileAndRunError::RunFailure { allowed: true, .. })
-                | Ok(_) => false,
-                Err(_) => true,
-            };
-            // Never clear `prev_run_failed`, only set it.
-            prev_runs_failed.fetch_or(failed, Ordering::Relaxed);
-            Some((suite, sscce_out_dir, res))
+            if !sscce_out_dir.is_dir() {
+                // TODO(harry): handle this error better
+                return Some(CompileAndRunResults {
+                    suite,
+                    sscce_out_dir,
+                    errors: HashMap::new().also(|hm| {
+                        hm.insert(
+                            instructions.config.opt_levels()[0],
+                            Some(CompileAndRunError::OutDirIsNotDir),
+                        );
+                    }),
+                });
+            }
+            let errors = compile_and_run(&suite, &sscce_out_dir, &compiler_lock, instructions)
+                .into_iter()
+                .map(|(opt_level, res)| {
+                    if let Err(CompileAndRunError::RunFailure { .. }) = res {
+                        if let Some(dir) = tmp_dir.lock().unwrap().take() {
+                            dir.into_path();
+                        }
+                    } else {
+                        let _ = fs::remove_dir_all(&sscce_out_dir);
+                    };
+                    let failed = match res {
+                        Err(CompileAndRunError::CompileFailure { allowed: true, .. })
+                        | Err(CompileAndRunError::RunFailure { allowed: true, .. })
+                        | Ok(_) => false,
+                        Err(_) => true,
+                    };
+                    // Never clear `prev_run_failed`, only set it.
+                    prev_runs_failed.fetch_or(failed, Ordering::Relaxed);
+                    (opt_level, res.err())
+                })
+                .collect::<HashMap<_, _>>();
+            Some(CompileAndRunResults {
+                suite,
+                sscce_out_dir,
+                errors,
+            })
         }
     };
     suites.into_par_iter().map(scanner).while_some()
