@@ -46,20 +46,15 @@ fn run_until_success<T, E>(
     f()
 }
 
-trait ResultFlip {
-    type Err;
-    type Ok;
-    fn flip(self) -> Result<Self::Err, Self::Ok>;
-}
+struct ElmCompilerPath(PathBuf);
 
-impl<T, E> ResultFlip for Result<T, E> {
-    type Err = E;
-    type Ok = T;
-    fn flip(self) -> Result<E, T> {
-        match self {
-            Ok(t) => Err(t),
-            Err(e) => Ok(e),
-        }
+impl ElmCompilerPath {
+    fn new_resolved(s: impl AsRef<OsStr>) -> Result<Self, which::Error> {
+        which::which(s).map(Self)
+    }
+
+    fn command(&self) -> Command {
+        Command::new(&self.0)
     }
 }
 
@@ -173,7 +168,6 @@ pub struct Config {
 
 #[derive(Debug)]
 pub enum CompileError {
-    CompilerNotFound(which::Error),
     Process(io::Error),
     Compiler(Output),
     CompilerStdErrNotEmpty(Output),
@@ -244,6 +238,7 @@ fn compile(
     out_file: impl AsRef<Path>,
     compiler_lock: &Mutex<()>,
     opt_level: OptimizationLevel,
+    compiler_path: &ElmCompilerPath,
     config: &config::Config,
 ) -> Result<(), CompileError> {
     fn compile_help(
@@ -274,9 +269,7 @@ fn compile(
     } else {
         vec![String::from("Main.elm")]
     };
-    let mut command = which::which(config.elm_compiler())
-        .map_err(CompileError::CompilerNotFound)?
-        .apply(Command::new);
+    let mut command = compiler_path.command();
 
     command.current_dir(suite);
     command.arg("make");
@@ -285,10 +278,6 @@ fn compile(
     command.arg("--output");
     set_elm_home(&mut command);
     command.arg(out_file.as_ref());
-    //     fs::canonicalize(&out_dir)
-    //         .map_err(CompileError::Process)?
-    //         .join("elm.js"),
-    // );
 
     debug!("Invoking compiler: {:?}", command);
 
@@ -428,12 +417,10 @@ harness(generated, expectedOutput);
 }
 
 fn detect_stdlib_variant(
-    elm_compiler: impl AsRef<OsStr>,
+    elm_compiler: &ElmCompilerPath,
 ) -> Result<StdlibVariant, DetectStdlibError> {
     use bstr::ByteSlice;
-    let mut command = which::which(elm_compiler)
-        .map_err(DetectStdlibError::CompilerNotFound)?
-        .apply(Command::new);
+    let mut command = elm_compiler.command();
     command.arg("--stdlib-variant");
     set_elm_home(&mut command);
 
@@ -456,10 +443,11 @@ fn compile_and_run(
     suite: impl AsRef<Path> + Sync,
     out_dir: impl AsRef<Path> + Sync,
     compiler_lock: &Mutex<()>,
-    instructions: &super::cli::Instructions,
+    actual_stdlib_variant: StdlibVariant,
+    elm_compiler: &ElmCompilerPath,
+    config: &config::Config,
 ) -> HashMap<OptimizationLevel, Result<(), CompileAndRunError>> {
-    instructions
-        .config
+    config
         .opt_levels()
         .par_iter()
         .copied()
@@ -487,7 +475,8 @@ fn compile_and_run(
                     out_dir.as_ref().join(format!("elm-{}.js", opt_level.id())),
                     &compiler_lock,
                     opt_level,
-                    &instructions.config,
+                    &elm_compiler,
+                    &config,
                 )
                 .map_err(|e| CompileAndRunError::CompileFailure {
                     allowed: compile_failure_allowed,
@@ -497,10 +486,6 @@ fn compile_and_run(
                 if compile_failure_allowed {
                     return Err(CompileAndRunError::ExpectedCompileFailure);
                 }
-
-                let actual_stdlib_variant =
-                    detect_stdlib_variant(instructions.config.elm_compiler())
-                        .map_err(CompileAndRunError::CannotDetectStdlibVariant)?;
 
                 let run_failure_allowed = suite_config.run_fails_if.is_met(&RunFailsIfAllFacts {
                     opt_level,
@@ -516,7 +501,7 @@ fn compile_and_run(
                     suite.as_ref(),
                     out_dir.as_ref(),
                     opt_level,
-                    &instructions.config,
+                    &config,
                     &suite_config,
                 )
                 .map_err(|e| CompileAndRunError::RunFailure {
@@ -543,6 +528,7 @@ pub struct CompileAndRunResults<Ps> {
     pub errors: HashMap<OptimizationLevel, Option<CompileAndRunError>>,
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
     suites: impl IntoParallelIterator<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
@@ -564,6 +550,8 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
     }
     let compiler_lock = Mutex::new(());
     let prev_runs_failed = AtomicBool::new(false);
+    let stdlib_variant = once_cell::sync::OnceCell::new();
+    let elm_compiler = once_cell::sync::OnceCell::new();
     let scanner = move |suite: Ps| {
         if instructions.fail_fast && prev_runs_failed.load(Ordering::Relaxed) {
             None
@@ -586,27 +574,75 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
                     }),
                 });
             }
-            let errors = compile_and_run(&suite, &sscce_out_dir, &compiler_lock, instructions)
-                .into_iter()
-                .map(|(opt_level, res)| {
-                    if let Err(CompileAndRunError::RunFailure { .. }) = res {
-                        if let Some(dir) = tmp_dir.lock().unwrap().take() {
-                            dir.into_path();
-                        }
-                    } else {
-                        let _ = fs::remove_dir_all(&sscce_out_dir);
-                    };
-                    let failed = match res {
-                        Err(CompileAndRunError::CompileFailure { allowed: true, .. })
-                        | Err(CompileAndRunError::RunFailure { allowed: true, .. })
-                        | Ok(_) => false,
-                        Err(_) => true,
-                    };
-                    // Never clear `prev_run_failed`, only set it.
-                    prev_runs_failed.fetch_or(failed, Ordering::Relaxed);
-                    (opt_level, res.err())
-                })
-                .collect::<HashMap<_, _>>();
+
+            // TODO(harry) move this up out of scanner
+            let elm_compiler = match elm_compiler.get_or_try_init(|| {
+                ElmCompilerPath::new_resolved(instructions.config.elm_compiler())
+            }) {
+                Ok(elm_compiler) => elm_compiler,
+                Err(e) => {
+                    // TODO(harry): handle this error better
+                    return Some(CompileAndRunResults {
+                        suite,
+                        sscce_out_dir,
+                        errors: HashMap::new().also(|hm| {
+                            hm.insert(
+                                instructions.config.opt_levels()[0],
+                                Some(CompileAndRunError::CannotDetectStdlibVariant(
+                                    DetectStdlibError::CompilerNotFound(e),
+                                )),
+                            );
+                        }),
+                    });
+                }
+            };
+
+            // TODO(harry) move this up out of scanner
+            let actual_stdlib_variant =
+                match stdlib_variant.get_or_try_init(|| detect_stdlib_variant(&elm_compiler)) {
+                    Ok(actual_stdlib_variant) => actual_stdlib_variant,
+                    Err(e) => {
+                        // TODO(harry): handle this error better
+                        return Some(CompileAndRunResults {
+                            suite,
+                            sscce_out_dir,
+                            errors: HashMap::new().also(|hm| {
+                                hm.insert(
+                                    instructions.config.opt_levels()[0],
+                                    Some(CompileAndRunError::CannotDetectStdlibVariant(e)),
+                                );
+                            }),
+                        });
+                    }
+                };
+            let errors = compile_and_run(
+                &suite,
+                &sscce_out_dir,
+                &compiler_lock,
+                *actual_stdlib_variant,
+                elm_compiler,
+                &instructions.config,
+            )
+            .into_iter()
+            .map(|(opt_level, res)| {
+                if let Err(CompileAndRunError::RunFailure { .. }) = res {
+                    if let Some(dir) = tmp_dir.lock().unwrap().take() {
+                        dir.into_path();
+                    }
+                } else {
+                    let _ = fs::remove_dir_all(&sscce_out_dir);
+                };
+                let failed = match res {
+                    Err(CompileAndRunError::CompileFailure { allowed: true, .. })
+                    | Err(CompileAndRunError::RunFailure { allowed: true, .. })
+                    | Ok(_) => false,
+                    Err(_) => true,
+                };
+                // Never clear `prev_run_failed`, only set it.
+                prev_runs_failed.fetch_or(failed, Ordering::Relaxed);
+                (opt_level, res.err())
+            })
+            .collect::<HashMap<_, _>>();
             Some(CompileAndRunResults {
                 suite,
                 sscce_out_dir,
