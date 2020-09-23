@@ -243,10 +243,6 @@ pub fn compile_and_run_error<'a, Pe: AsRef<Path> + 'a, Ps: AsRef<Path> + 'a>(
                 "elm-torture expected a failure when running suite {}",
                 &suite.as_ref().display(),
             ),
-
-            CannotDetectStdlibVariant(e) => {
-                panic!("Failed to detect stdlib variant due to error: {:?}", e)
-            }
         }
     })
 }
@@ -303,6 +299,19 @@ pub fn collect_and_print<T: Send>(
             }
         }
         suite_results.into_iter().map(Option::unwrap).collect()
+    })
+}
+
+pub fn suites_error<'a>(err: &'a suite::SuitesError) -> impl fmt::Display + 'a {
+    use suite::SuitesError;
+    easy_format(move |_| match err {
+        suite::SuitesError::CompilerNotFound(e) => {
+            panic!("Could not find the elm compiler {:?}", e)
+        }
+
+        SuitesError::CannotDetectStdlibVariant(e) => {
+            panic!("Failed to detect stdlib variant due to error: {:?}", e)
+        }
     })
 }
 

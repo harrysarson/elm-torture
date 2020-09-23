@@ -14,17 +14,16 @@ use std::{num::NonZeroI32, path::Path};
 
 const WELCOME_MESSAGE: &str = "Elm Torture - stress tests for an elm compiler";
 
+const CATCH_ALL_ERROR_CODE: i32 = 0x28;
+
 #[allow(clippy::enum_glob_use)]
 fn get_exit_code(err: &suite::CompileAndRunError) -> i32 {
     use suite::CompileAndRunError::*;
 
     match err {
-        CannotDetectStdlibVariant(_)
-        | SuiteNotExist
-        | SuiteNotDir
-        | SuiteNotElm
-        | OutDirIsNotDir
-        | CannotGetSuiteConfig(_) => 0x28,
+        SuiteNotExist | SuiteNotDir | SuiteNotElm | OutDirIsNotDir | CannotGetSuiteConfig(_) => {
+            CATCH_ALL_ERROR_CODE
+        }
 
         CompileFailure { allowed, .. } => {
             if *allowed {
@@ -68,56 +67,64 @@ Running the following {} SSCCE{}:
         }))
     );
 
-    let suite_results = formatting::collect_and_print(
-        suite::compile_and_run_suites(suites.par_iter(), instructions),
-        |suite::CompileAndRunResults { suite, .. }| {
-            suites
-                .iter()
-                .position(|s| s.as_ref() == suite.as_ref())
-                .unwrap()
-        },
-        |suite::CompileAndRunResults {
-             suite,
-             sscce_out_dir,
-             errors,
-         }| {
-            for (opt_level, e) in errors.iter().filter_map(|(ol, e)| Some(ol).zip(e.as_ref())) {
-                println!(
-                    "{} with opt-level of {}\n{}",
-                    suite.as_ref().display(),
-                    opt_level,
-                    indented::indented(formatting::compile_and_run_error(e, suite, &sscce_out_dir))
-                );
-            }
-        },
-    );
+    match suite::compile_and_run_suites(suites.par_iter(), instructions) {
+        Ok(res_iter) => {
+            let suite_results = formatting::collect_and_print(
+                res_iter,
+                |suite::CompileAndRunResults { suite, .. }| {
+                    suites
+                        .iter()
+                        .position(|s| s.as_ref() == suite.as_ref())
+                        .unwrap()
+                },
+                |suite::CompileAndRunResults {
+                     suite,
+                     sscce_out_dir,
+                     errors,
+                 }| {
+                    for (opt_level, e) in
+                        errors.iter().filter_map(|(ol, e)| Some(ol).zip(e.as_ref()))
+                    {
+                        println!(
+                            "{} with opt-level of {}\n{}",
+                            suite.as_ref().display(),
+                            opt_level,
+                            indented::indented(formatting::compile_and_run_error(
+                                e,
+                                suite,
+                                &sscce_out_dir
+                            ))
+                        );
+                    }
+                },
+            );
 
-    println!(
-        "
+            println!(
+                "
 elm-torture has run the following {} SSCCE{}:
 {}
 ",
-        suites.len(),
-        if suites.len() == 1 { "" } else { "s" },
-        indented::indented(formatting::easy_format(|f| {
-            let mut opt_levels_of_interest = HashSet::new();
-            loop {
-                let mut current_opt_level = None;
-                for suite::CompileAndRunResults { suite, errors, .. } in &suite_results {
-                    use suite::CompileAndRunError;
-                    for (run_opt_level, possible_error) in errors.iter() {
-                        let should_print = if let Some(ol) = current_opt_level {
-                            ol == run_opt_level
-                        } else if opt_levels_of_interest.contains(run_opt_level) {
-                            false
-                        } else {
-                            current_opt_level = Some(run_opt_level);
-                            opt_levels_of_interest.insert(run_opt_level);
-                            writeln!(f, "With an opt-level of {}", run_opt_level)?;
-                            true
-                        };
-                        if should_print {
-                            writeln_indented!(
+                suites.len(),
+                if suites.len() == 1 { "" } else { "s" },
+                indented::indented(formatting::easy_format(|f| {
+                    let mut opt_levels_of_interest = HashSet::new();
+                    loop {
+                        let mut current_opt_level = None;
+                        for suite::CompileAndRunResults { suite, errors, .. } in &suite_results {
+                            use suite::CompileAndRunError;
+                            for (run_opt_level, possible_error) in errors.iter() {
+                                let should_print = if let Some(ol) = current_opt_level {
+                                    ol == run_opt_level
+                                } else if opt_levels_of_interest.contains(run_opt_level) {
+                                    false
+                                } else {
+                                    current_opt_level = Some(run_opt_level);
+                                    opt_levels_of_interest.insert(run_opt_level);
+                                    writeln!(f, "With an opt-level of {}", run_opt_level)?;
+                                    true
+                                };
+                                if should_print {
+                                    writeln_indented!(
                                 f,
                                 "{} ({})",
                                 suite.as_ref().display(),
@@ -138,23 +145,30 @@ elm-torture has run the following {} SSCCE{}:
                                     None => "success".green(),
                                 }
                             )?
+                                }
+                            }
+                        }
+                        if current_opt_level.is_none() {
+                            break;
                         }
                     }
-                }
-                if current_opt_level.is_none() {
-                    break;
-                }
-            }
-            Ok(())
-        }))
-    );
-    let code = suite_results
-        .iter()
-        .flat_map(|suite::CompileAndRunResults { errors, .. }| {
-            errors.iter().filter_map(|(_, e)| e.as_ref())
-        })
-        .fold(0, |code, error| code | get_exit_code(error));
-    NonZeroI32::new(code)
+                    Ok(())
+                }))
+            );
+            let code = suite_results
+                .iter()
+                .flat_map(|suite::CompileAndRunResults { errors, .. }| {
+                    errors.iter().filter_map(|(_, e)| e.as_ref())
+                })
+                .fold(0, |code, error| code | get_exit_code(error));
+            NonZeroI32::new(code)
+        }
+        Err(e) => {
+            println!("{}", formatting::suites_error(&e));
+
+            NonZeroI32::new(CATCH_ALL_ERROR_CODE)
+        }
+    }
 }
 
 fn run_app(instructions: cli::Instructions) -> Option<NonZeroI32> {

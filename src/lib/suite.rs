@@ -179,7 +179,6 @@ pub enum CompileError {
 #[derive(Debug)]
 pub enum DetectStdlibError {
     Io(io::Error),
-    CompilerNotFound(which::Error),
     Parsing(Box<[u8]>),
 }
 #[derive(Debug)]
@@ -224,7 +223,6 @@ pub enum CompileAndRunError {
     },
     ExpectedCompileFailure,
     ExpectedRunFailure,
-    CannotDetectStdlibVariant(DetectStdlibError),
 }
 
 fn set_elm_home(command: &mut Command) {
@@ -528,11 +526,16 @@ pub struct CompileAndRunResults<Ps> {
     pub errors: HashMap<OptimizationLevel, Option<CompileAndRunError>>,
 }
 
+pub enum SuitesError {
+    CompilerNotFound(which::Error),
+    CannotDetectStdlibVariant(DetectStdlibError),
+}
+
 #[allow(clippy::too_many_lines)]
 pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
     suites: impl IntoParallelIterator<Item = Ps> + 'a,
     instructions: &'a super::cli::Instructions,
-) -> impl IntoParallelIterator<Item = CompileAndRunResults<Ps>> + 'a {
+) -> Result<impl IntoParallelIterator<Item = CompileAndRunResults<Ps>> + 'a, SuitesError> {
     let (tmp_dir_raw, out_dir) = if let Some(out_dir) = &instructions.config.out_dir {
         (None, out_dir.to_path_buf())
     } else {
@@ -550,8 +553,12 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
     }
     let compiler_lock = Mutex::new(());
     let prev_runs_failed = AtomicBool::new(false);
-    let stdlib_variant = once_cell::sync::OnceCell::new();
-    let elm_compiler = once_cell::sync::OnceCell::new();
+
+    let elm_compiler = ElmCompilerPath::new_resolved(instructions.config.elm_compiler())
+        .map_err(SuitesError::CompilerNotFound)?;
+    let actual_stdlib_variant =
+        detect_stdlib_variant(&elm_compiler).map_err(SuitesError::CannotDetectStdlibVariant)?;
+
     let scanner = move |suite: Ps| {
         if instructions.fail_fast && prev_runs_failed.load(Ordering::Relaxed) {
             None
@@ -575,52 +582,12 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
                 });
             }
 
-            // TODO(harry) move this up out of scanner
-            let elm_compiler = match elm_compiler.get_or_try_init(|| {
-                ElmCompilerPath::new_resolved(instructions.config.elm_compiler())
-            }) {
-                Ok(elm_compiler) => elm_compiler,
-                Err(e) => {
-                    // TODO(harry): handle this error better
-                    return Some(CompileAndRunResults {
-                        suite,
-                        sscce_out_dir,
-                        errors: HashMap::new().also(|hm| {
-                            hm.insert(
-                                instructions.config.opt_levels()[0],
-                                Some(CompileAndRunError::CannotDetectStdlibVariant(
-                                    DetectStdlibError::CompilerNotFound(e),
-                                )),
-                            );
-                        }),
-                    });
-                }
-            };
-
-            // TODO(harry) move this up out of scanner
-            let actual_stdlib_variant =
-                match stdlib_variant.get_or_try_init(|| detect_stdlib_variant(&elm_compiler)) {
-                    Ok(actual_stdlib_variant) => actual_stdlib_variant,
-                    Err(e) => {
-                        // TODO(harry): handle this error better
-                        return Some(CompileAndRunResults {
-                            suite,
-                            sscce_out_dir,
-                            errors: HashMap::new().also(|hm| {
-                                hm.insert(
-                                    instructions.config.opt_levels()[0],
-                                    Some(CompileAndRunError::CannotDetectStdlibVariant(e)),
-                                );
-                            }),
-                        });
-                    }
-                };
             let errors = compile_and_run(
                 &suite,
                 &sscce_out_dir,
                 &compiler_lock,
-                *actual_stdlib_variant,
-                elm_compiler,
+                actual_stdlib_variant,
+                &elm_compiler,
                 &instructions.config,
             )
             .into_iter()
@@ -650,5 +617,5 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
             })
         }
     };
-    suites.into_par_iter().map(scanner).while_some()
+    suites.into_par_iter().map(scanner).while_some().apply(Ok)
 }
