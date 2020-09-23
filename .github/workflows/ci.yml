@@ -79,13 +79,8 @@ jobs:
         with:
           command: build
 
-      - name: Basic torture run
+      - name: Torture run
         env:
           RUST_LOG: debug
-        run: cargo run -- --suites suite --config config.json
+        run: cargo run -- --suites suite --config config.json --opt-levels debug,dev,optimize
 
-      - name: Debug torture run
-        run: cargo run -- --suites suite --config config.json --opt-level debug
-
-      - name: Optimized torture run
-        run: cargo run -- --suites suite --config config.json --opt-level optimize
