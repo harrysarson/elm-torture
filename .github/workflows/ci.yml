@@ -81,6 +81,6 @@ jobs:
 
       - name: Torture run
         env:
-          RUST_LOG: debug
+          CLICOLOR_FORCE: true
         run: cargo run -- --suites suite --config config.json --opt-levels debug,dev,optimize
 
