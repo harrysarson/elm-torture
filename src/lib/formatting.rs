@@ -59,10 +59,9 @@ fn process_stderr<'a>(stderr: &'a [u8]) -> impl fmt::Display + 'a {
     })
 }
 
-fn compiler_error<'a, P1: AsRef<Path> + 'a, P2: AsRef<Path> + 'a>(
+fn compiler_error<'a>(
     err: &'a suite::CompileError,
-    suite: P1,
-    out_dir: Option<P2>,
+    suite: impl AsRef<Path> + 'a,
 ) -> impl fmt::Display + 'a {
     easy_format(move |f| {
         use suite::CompileError::*;
@@ -86,18 +85,6 @@ fn compiler_error<'a, P1: AsRef<Path> + 'a, P2: AsRef<Path> + 'a>(
                 panic!("Path was not suite - this should have been checked already!")
             }
             DeletingElmStuff(e) => panic!("Could not delete elm-stuff directory! Details: {}", e),
-
-            OutDirIsNotDir => {
-                if let Some(dir) = out_dir.as_ref() {
-                    write!(
-                        f,
-                        "{} must either be a directory or a path where elm-torture can create one!",
-                        dir.as_ref().display()
-                    )
-                } else {
-                    panic!("Invalid tempory directory")
-                }
-            }
         }
     })
 }
@@ -172,16 +159,10 @@ To inspect the built files that caused this error see: {}",
     })
 }
 
-pub fn compile_and_run_error<
-    'a,
-    Pe: AsRef<Path> + 'a,
-    Pp: AsRef<Path> + 'a,
-    Ps: AsRef<Path> + 'a,
->(
+pub fn compile_and_run_error<'a, Pe: AsRef<Path> + 'a, Ps: AsRef<Path> + 'a>(
     err: &'a CompileAndRunError,
     suite: Ps,
     out_dir: Pe,
-    provided_path: Option<Pp>,
 ) -> impl fmt::Display + 'a {
     easy_format(move |f| {
         use CompileAndRunError::*;
@@ -206,6 +187,12 @@ pub fn compile_and_run_error<
                 suite.as_ref().display()
             ),
 
+            OutDirIsNotDir => write!(
+                f,
+                "{} must either be a directory or a path where elm-torture can create one!",
+                out_dir.as_ref().display()
+            ),
+
             CannotGetSuiteConfig(CannotRead(e)) => write!(
                 f,
                 "{} {}",
@@ -228,7 +215,7 @@ pub fn compile_and_run_error<
                     f,
                     "Failed to compile suite {}.\n{}\n",
                     &suite.as_ref().display(),
-                    indented::indented(compiler_error(&reason, &suite, provided_path.as_ref()))
+                    indented::indented(compiler_error(&reason, &suite))
                 )?;
                 if *allowed {
                     write!(f, "Failure allowed, continuing...")
@@ -284,14 +271,6 @@ pub fn find_suite_error<'a>(
                 suite_dir.display()
             ),
             ReadingDir(e) => Err(e).unwrap(),
-            ProvidedPathIsSuiteItself => write!(
-                fmt,
-                "elm-torture cannot run suites in {} as it is a suite itself!
-To run this suite individually try `--suite {}` (note `suite` rather than `--suites`).
-    ",
-                suite_dir.display(),
-                suite_dir.display(),
-            ),
         }
     })
 }
@@ -330,4 +309,15 @@ pub fn collect_and_print<T: Send>(
         }
         suite_results.into_iter().map(Option::unwrap).collect()
     })
+}
+
+#[macro_export]
+macro_rules! writeln_indented {
+    ($dst:expr, $($arg:tt)*) => (std::write!(
+        $dst,
+        "{}",
+        indented::indented($crate::formatting::easy_format(|f| {
+            writeln!(f, $($arg)*)
+        }))
+    ))
 }

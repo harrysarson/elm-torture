@@ -7,18 +7,18 @@ use std::path::PathBuf;
 pub enum Error {
     ProvidedPathIsNotDir,
     ReadingDir(io::Error),
-    ProvidedPathIsSuiteItself,
 }
 
 pub fn find_suites(suites_dir: &Path) -> Result<Box<[PathBuf]>, Error> {
     if suites_dir.is_dir() {
         if suites_dir.join("elm.json").exists() {
-            return Err(Error::ProvidedPathIsSuiteItself);
+            Ok(Box::new([suites_dir.to_path_buf()]))
+        } else {
+            let mut suites = vec![];
+            add_suites(suites_dir, &mut suites)?;
+            suites.sort_unstable();
+            Ok(suites.into_boxed_slice())
         }
-        let mut suites = vec![];
-        add_suites(suites_dir, &mut suites)?;
-        suites.sort_unstable();
-        Ok(suites.into_boxed_slice())
     } else {
         Err(Error::ProvidedPathIsNotDir)
     }

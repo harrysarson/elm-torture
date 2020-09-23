@@ -5,12 +5,45 @@ use std::string::String;
 use std::time::Duration;
 use std::{fmt, path::PathBuf};
 
-#[derive(Debug, Deserialize, Serialize, Clap, PartialEq, Eq, Clone, Copy)]
+// TODO(harry): fix spelling
+#[derive(Debug, Deserialize, Serialize, Clap, PartialEq, Eq, Clone, Copy, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum OptimisationLevel {
     Debug,
     Dev,
     Optimize,
+}
+
+impl OptimisationLevel {
+    pub fn args(self) -> &'static [&'static str] {
+        match self {
+            OptimisationLevel::Debug => &["--debug"],
+            OptimisationLevel::Dev => &[],
+            OptimisationLevel::Optimize => &["--optimize"],
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            OptimisationLevel::Debug => &"debug",
+            OptimisationLevel::Dev => &"dev",
+            OptimisationLevel::Optimize => &"optimize",
+        }
+    }
+}
+
+impl fmt::Display for OptimisationLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                OptimisationLevel::Debug => &"debug",
+                OptimisationLevel::Dev => &"dev (default)",
+                OptimisationLevel::Optimize => &"optimize",
+            }
+        )
+    }
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clap)]
@@ -23,9 +56,11 @@ pub struct Config {
     #[clap(
         short,
         long,
+        multiple(false),
+        use_delimiter(true),
         about = "Optimization level to use when compiling SSCCEs."
     )]
-    opt_level: Option<OptimisationLevel>,
+    opt_levels: Option<Vec<OptimisationLevel>>,
     #[clap(
         long,
         value_name = "N",
@@ -63,7 +98,7 @@ impl Config {
         Config {
             elm_compiler: merge!(elm_compiler),
             node: merge!(node),
-            opt_level: merge!(opt_level),
+            opt_levels: merge!(opt_levels),
             compiler_max_retries: merge!(compiler_max_retries),
             run_timeout: merge!(run_timeout),
             out_dir: merge!(out_dir),
@@ -80,15 +115,11 @@ impl Config {
         self.node.as_ref().map_or_else(|| "node", String::as_str)
     }
 
-    pub fn opt_level(&self) -> OptimisationLevel {
-        self.opt_level.unwrap_or(OptimisationLevel::Dev)
-    }
-
-    pub fn args(&self) -> &[&'static str] {
-        match self.opt_level() {
-            OptimisationLevel::Debug => &["--debug"],
-            OptimisationLevel::Dev => &[],
-            OptimisationLevel::Optimize => &["--optimize"],
+    pub fn opt_levels(&self) -> &[OptimisationLevel] {
+        if let Some(levels) = &self.opt_levels {
+            &levels
+        } else {
+            &[OptimisationLevel::Dev]
         }
     }
 
