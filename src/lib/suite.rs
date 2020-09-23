@@ -7,12 +7,9 @@ use log::debug;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
+use std::env;
+use std::process::{Output, Stdio};
 use std::{collections::HashMap, fs::File};
-use std::{env, ffi::OsStr};
-use std::{
-    ffi::OsString,
-    process::{Output, Stdio},
-};
 use std::{fs, sync::Mutex};
 use std::{io, process::Command};
 use std::{
@@ -62,19 +59,19 @@ fn iter_pairs<T: Clone + Sync + Send, U: Send>(
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct ElmCompilerPath {
-    unresolved: OsString,
+    unresolved: String,
     path: PathBuf,
     pub stdlib_variant: StdlibVariant,
 }
 
 impl fmt::Display for ElmCompilerPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.unresolved.to_string_lossy())
+        write!(f, "{}", self.unresolved)
     }
 }
 
 impl ElmCompilerPath {
-    fn new_resolved(binary_name: OsString) -> Result<Self, DetectStdlibError> {
+    fn new_resolved(binary_name: String) -> Result<Self, DetectStdlibError> {
         use bstr::ByteSlice;
         let path = which::which(&binary_name).map_err(DetectStdlibError::LocatingCompiler)?;
         let mut command = Command::new(&path);
@@ -584,7 +581,7 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
         .config
         .elm_compilers()
         .iter()
-        .map(|s| ElmCompilerPath::new_resolved(s.to_os_string()))
+        .map(|s| ElmCompilerPath::new_resolved(s.clone()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(SuitesError::ResolvingCompiler)?;
 
