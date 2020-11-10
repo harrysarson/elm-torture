@@ -20,5 +20,5 @@ replace_with = "0.1.7"
 humantime-serde = "1.0.1"
 pathdiff = "0.2.0"
 tokio = { version = "0.2", features = ["full"] }
-futures = "0.3.6"
+futures = "0.3.8"
 humantime = "2.0.1"
