@@ -311,7 +311,17 @@ fn compile(
                 }
             })
             .map_err(CompileError::DeletingElmStuff)?;
-        command.output().map_err(CompileError::Process)
+        let output = command.output().map_err(CompileError::Process)?;
+
+        if !output.status.success() {
+            return Err(CompileError::Compiler(output));
+        }
+
+        if !output.stderr.is_empty() {
+            return Err(CompileError::CompilerStdErrNotEmpty(output));
+        }
+
+        Ok(output)
     };
 
     if !suite.join("elm.json").exists() {
@@ -341,21 +351,13 @@ fn compile(
 
     debug!("Invoking compiler: {:?}", command);
 
-    let (retries, output) = match run_until_success(config.compiler_max_retries(), || {
+    let (retries, _) = match run_until_success(config.compiler_max_retries(), || {
         let _lock = compiler_lock.lock();
         compile_help(&suite, &mut command)
     }) {
         (r, Ok(op)) => (r, op),
         (r, Err(e)) => return (r, Err(e)),
     };
-
-    if !output.status.success() {
-        return (retries, Err(CompileError::Compiler(output)));
-    }
-
-    if !output.stderr.is_empty() {
-        return (retries, Err(CompileError::CompilerStdErrNotEmpty(output)));
-    }
 
     (retries, Ok(()))
 }
