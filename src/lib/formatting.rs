@@ -156,6 +156,7 @@ pub fn compile_and_run_error<'a, Pe: AsRef<Path> + 'a, Ps: AsRef<Path> + 'a>(
     err: &'a CompileAndRunError,
     suite: Ps,
     out_dir: Pe,
+    retries: usize,
 ) -> impl fmt::Display + 'a {
     easy_format(move |f| {
         use CompileAndRunError::*;
@@ -206,8 +207,9 @@ pub fn compile_and_run_error<'a, Pe: AsRef<Path> + 'a, Ps: AsRef<Path> + 'a>(
             CompileFailure { allowed, reason } => {
                 write!(
                     f,
-                    "Failed to compile suite {}.\n{}\n",
+                    "Failed to compile suite {} after {} retries.\n{}\n",
                     &suite.as_ref().display(),
+                    retries,
                     indented::indented(compiler_error(&reason, &suite))
                 )?;
                 if *allowed {
