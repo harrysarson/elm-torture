@@ -52,22 +52,27 @@ fn sscce_result_printer(
         errors,
     }: &suite::CompileAndRunResults<impl AsRef<Path>>,
 ) {
-    let errors_to_print = errors.iter().filter_map(|(ol, me)| match me {
+    let errors_to_print = errors.iter().filter_map(|(ol, (retries, me))| match me {
         Some(suite::CompileAndRunError::RunFailure { allowed, .. })
         | Some(suite::CompileAndRunError::CompileFailure { allowed, .. })
             if *allowed =>
         {
             None
         }
-        e => Some(ol).zip(e.as_ref()),
+        e => e.as_ref().map(|ee| (ol, (retries, ee))),
     });
-    for ((elm_compiler, opt_level), e) in errors_to_print {
+    for ((elm_compiler, opt_level), (retries, e)) in errors_to_print {
         println!(
             "{} compiling with {} in {} optimisation mode\n{}",
             suite.as_ref().display().to_string().black().on_white(),
             elm_compiler.to_string().black().on_white(),
             opt_level.to_string().black().on_white(),
-            indented::indented(formatting::compile_and_run_error(e, suite, &sscce_out_dir))
+            indented::indented(formatting::compile_and_run_error(
+                e,
+                suite,
+                &sscce_out_dir,
+                *retries
+            ))
         );
     }
 }
@@ -115,7 +120,7 @@ elm-torture has run the following {} SSCCE{}:
                         let mut current_opt_level = None;
                         for suite::CompileAndRunResults { suite, errors, .. } in &suite_results {
                             use suite::CompileAndRunError;
-                            for (sscce_run_type, possible_error) in errors.iter() {
+                            for (sscce_run_type, (_, possible_error)) in errors.iter() {
                                 let (compiler, run_opt_level) = sscce_run_type;
                                 let should_print = if let Some(ol) = current_opt_level {
                                     ol == sscce_run_type
@@ -167,7 +172,7 @@ elm-torture has run the following {} SSCCE{}:
             let code = suite_results
                 .iter()
                 .flat_map(|suite::CompileAndRunResults { errors, .. }| {
-                    errors.iter().filter_map(|(_, e)| e.as_ref())
+                    errors.iter().filter_map(|(_, (_, e))| e.as_ref())
                 })
                 .fold(0, |code, error| code | get_exit_code(error));
             NonZeroI32::new(code)
