@@ -222,6 +222,8 @@ pub struct Config {
     compile_fails_if: Option<ConditionCollection<CompileFailsIfAll>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     run_fails_if: Option<ConditionCollection<RunFailsIfAll>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_run_if: Option<ConditionCollection<RunFailsIfAll>>,
 }
 
 #[derive(Debug)]
@@ -549,7 +551,15 @@ fn compile_and_run(
                     return (retries, Err(CompileAndRunError::ExpectedCompileFailure));
                 }
 
-                let run_failure_allowed = suite_config.run_fails_if.is_met(&RunFailsIfAllFacts {
+                if suite_config.skip_run_if.is_met(&RunFailsIfAllFacts {
+                    opt_level,
+                    stdlib_variant: elm_compiler.stdlib_variant,
+                    platform,
+                }) {
+                    return (retries, Ok(()));
+                }
+
+                let run_failure_required = suite_config.run_fails_if.is_met(&RunFailsIfAllFacts {
                     opt_level,
                     stdlib_variant: elm_compiler.stdlib_variant,
                     platform,
@@ -557,7 +567,7 @@ fn compile_and_run(
 
                 debug!(
                     "Runtime failure allowed? {:?}. Config: {:?}. Actual {:?}",
-                    run_failure_allowed, &suite_config.run_fails_if, elm_compiler.stdlib_variant
+                    run_failure_required, &suite_config.run_fails_if, elm_compiler.stdlib_variant
                 );
 
                 if let Err(e) = run(
@@ -570,13 +580,13 @@ fn compile_and_run(
                     return (
                         retries,
                         Err(CompileAndRunError::RunFailure {
-                            allowed: run_failure_allowed,
+                            allowed: run_failure_required,
                             reason: e,
                         }),
                     );
                 };
 
-                if run_failure_allowed {
+                if run_failure_required {
                     return (retries, Err(CompileAndRunError::ExpectedRunFailure));
                 }
 
