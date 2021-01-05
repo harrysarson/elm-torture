@@ -21,7 +21,7 @@
             "2"
         ]
     ],
-    "run-fails-if": {
+    "skip-run-if": {
         "platform": ["macos"]
     }
 }
