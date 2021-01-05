@@ -6,8 +6,6 @@ on:
       - staging
       - trying
 
-  pull_request:
-
 jobs:
   test:
     name: Test
