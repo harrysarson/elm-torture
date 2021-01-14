@@ -21,7 +21,7 @@ humantime-serde = "1.0.0"
 pathdiff = "0.2.0"
 tokio = { version = "0.2", features = ["full"] }
 futures = "0.3.6"
-humantime = "2.0.1"
+humantime = "2.1.0"
 wait-timeout = "0.2.0"
 rayon = "1.5"
 apply = "0.3"
