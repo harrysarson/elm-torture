@@ -324,7 +324,7 @@ fn compile(
         }
 
         Ok(output)
-    };
+    }
 
     if !suite.join("elm.json").exists() {
         return (0, Err(CompileError::SuiteDoesNotExist));
