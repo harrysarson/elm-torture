@@ -20,7 +20,7 @@ pub fn easy_format<F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result>(func: F) -> im
     Formatable { func }
 }
 
-fn process_output<'a>(output: &'a process::Output) -> impl fmt::Display + 'a {
+fn process_output(output: &process::Output) -> impl fmt::Display + '_ {
     easy_format(move |f| {
         write!(
             f,
@@ -35,7 +35,7 @@ fn process_output<'a>(output: &'a process::Output) -> impl fmt::Display + 'a {
     })
 }
 
-fn process_stdout<'a>(stdout: &'a [u8]) -> impl fmt::Display + 'a {
+fn process_stdout(stdout: &[u8]) -> impl fmt::Display + '_ {
     easy_format(move |f| {
         write!(
             f,
@@ -46,7 +46,7 @@ fn process_stdout<'a>(stdout: &'a [u8]) -> impl fmt::Display + 'a {
     })
 }
 
-fn process_stderr<'a>(stderr: &'a [u8]) -> impl fmt::Display + 'a {
+fn process_stderr(stderr: &[u8]) -> impl fmt::Display + '_ {
     easy_format(move |f| {
         write!(
             f,
@@ -243,6 +243,8 @@ pub fn compile_and_run_error<'a, Pe: AsRef<Path> + 'a, Ps: AsRef<Path> + 'a>(
                 "elm-torture expected a failure when running suite {}",
                 &suite.as_ref().display(),
             ),
+
+            Server(err) => write!(f, "could not run testing server {}", &err),
         }
     })
 }
@@ -266,7 +268,7 @@ pub fn find_suite_error<'a>(
     })
 }
 
-pub fn suites_error<'a>(err: &'a suite::SuitesError) -> impl fmt::Display + 'a {
+pub fn suites_error(err: &suite::SuitesError) -> impl fmt::Display + '_ {
     use suite::SuitesError;
     easy_format(move |_| match err {
         SuitesError::ResolvingCompiler(e) => panic!("Could not resolve the elm compiler {:?}", e), // SuitesError::CannotDetectStdlibVariant(e) => {
