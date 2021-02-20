@@ -1,4 +1,9 @@
 use super::config;
+use super::server_pool::Protocol;
+use super::server_pool::ServerId;
+use super::server_pool::ServerPool;
+use anyhow::bail;
+use anyhow::Context;
 use apply::{Also, Apply};
 use config::OptimizationLevel;
 use core::fmt;
@@ -7,8 +12,15 @@ use log::debug;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::json;
+use serde_json::map::Entry;
+use serde_json::Map;
 use std::env;
+use std::marker::PhantomData;
+use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
 use std::process::{Output, Stdio};
+use std::sync::Arc;
 use std::{collections::HashMap, fs::File};
 use std::{fs, sync::Mutex};
 use std::{io, process::Command};
@@ -20,6 +32,7 @@ use std::{
     time::Duration,
 };
 use wait_timeout::ChildExt;
+use warp::Filter;
 
 type AnyOneOf<T> = Option<Box<[T]>>;
 
@@ -111,10 +124,34 @@ pub enum PortType {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", tag = "method")]
+pub enum Request {
+    Get { url: String },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case", transparent)]
+pub struct Response(String);
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct NetworkItem {
+    request: Request,
+    response: Response,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PortName(String);
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PortArg(serde_json::Value);
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct Flags<Readiness>(
+    serde_json::Map<String, serde_json::Value>,
+    PhantomData<Readiness>,
+);
 
 #[serde(rename_all = "kebab-case")]
 #[derive(Debug, Deserialize, Serialize, Eq, PartialEq, Clone, Copy, Hash)]
@@ -212,10 +249,20 @@ impl Condition for CompileFailsIfAll {
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
+struct Ready;
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct Raw;
+
+#[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct Config {
+pub struct Config<Readiness> {
     #[serde(skip_serializing_if = "Option::is_none")]
     ports: Option<Box<[(PortType, PortName, PortArg)]>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    flags: Option<Flags<Readiness>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    network: Option<Arc<[NetworkItem]>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     logs: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -224,6 +271,47 @@ pub struct Config {
     run_fails_if: Option<ConditionCollection<RunFailsIfAll>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     skip_run_if: Option<ConditionCollection<RunFailsIfAll>>,
+}
+
+impl Config<Raw> {
+    fn make_ready(
+        self,
+        url_and_protocol: Option<(impl AsRef<str>, impl AsRef<str>)>,
+    ) -> anyhow::Result<Config<Ready>> {
+        let Self {
+            ports,
+            flags,
+            network,
+            logs,
+            compile_fails_if,
+            run_fails_if,
+            skip_run_if,
+        } = self;
+
+        let mut flags = flags.map_or_else(Map::new, |Flags(flags, _)| flags);
+        match flags.entry("suite") {
+            Entry::Occupied(_) => {
+                bail!("Flags cannot have the key suite (it is reserved for suite params)!");
+            }
+            Entry::Vacant(v) => {
+                if let Some((url, protocol)) = url_and_protocol {
+                    v.insert(json!({
+                        "url": url.as_ref(),
+                        "protocol":protocol.as_ref()
+                    }));
+                }
+            }
+        }
+        Ok(Config {
+            flags: Some(Flags(flags, PhantomData)),
+            ports,
+            network,
+            logs,
+            compile_fails_if,
+            run_fails_if,
+            skip_run_if,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -284,6 +372,7 @@ pub enum CompileAndRunError {
     },
     ExpectedCompileFailure,
     ExpectedRunFailure,
+    Server(anyhow::Error),
 }
 
 fn set_elm_home(command: &mut Command) {
@@ -364,7 +453,7 @@ fn compile(
     (retries, Ok(()))
 }
 
-fn get_suite_config(suite: impl AsRef<Path>) -> Result<Config, GetSuiteConfigError> {
+fn get_suite_config(suite: impl AsRef<Path>) -> Result<Config<Raw>, GetSuiteConfigError> {
     let expected_output_path = suite.as_ref().join("output.json");
     serde_json::from_slice(
         &fs::read(expected_output_path).map_err(GetSuiteConfigError::CannotRead)?,
@@ -378,7 +467,7 @@ fn run(
     out_dir: &Path,
     opt_level: OptimizationLevel,
     config: &config::Config,
-    suite_config: &Config,
+    suite_config: &Config<Ready>,
 ) -> Result<(), RunError> {
     fn read_to_buf(mut read: impl io::Read) -> io::Result<Vec<u8>> {
         let mut buffer = Vec::new();
@@ -393,12 +482,18 @@ fn run(
     }
     let node_exe = which::which(&config.node()).map_err(RunError::NodeNotFound)?;
     let harness_file = out_dir.join("harness.js");
+    let xml_http_request_file = out_dir.join("xmlhttprequest.js");
     let output_file = out_dir.join("output.json");
     let main_file = out_dir.join("main.js");
 
     fs::write(
         &harness_file,
         &include_bytes!("../../embed-assets/run.js")[..],
+    )
+    .map_err(RunError::WritingHarness)?;
+    fs::write(
+        &xml_http_request_file,
+        &include_bytes!("../../embed-assets/elm-serverless/src-bridge/xmlhttprequest.js")[..],
     )
     .map_err(RunError::WritingHarness)?;
     fs::write(
@@ -414,6 +509,7 @@ fn run(
                 f,
                 r#"
 const harness = require('./harness.js');
+global.XMLHttpRequest = require('./xmlhttprequest.js').XMLHttpRequest;
 const generated = require('./elm-{}.js');
 const expectedOutput = require('./output.json');
 
@@ -485,6 +581,7 @@ harness(generated, expectedOutput);
 
 pub type SscceRunType = (ElmCompilerPath, OptimizationLevel);
 
+#[allow(clippy::too_many_lines)]
 fn compile_and_run(
     suite: impl AsRef<Path> + Sync,
     out_dir: impl AsRef<Path> + Sync,
@@ -498,10 +595,11 @@ fn compile_and_run(
         "windows" => Platform::Windows,
         _ => panic!("Unsupported platform. (Add it to Platform enum!)"),
     };
+    let server_pool = ServerPool::new().unwrap();
     configurations
         .into_par_iter()
         .map(|(elm_compiler, opt_level)| {
-            let res: (_, _) = (|| {
+            let res: (_, _) = crossbeam::scope(|_| {
                 if !suite.as_ref().exists() {
                     return (0, Err(CompileAndRunError::SuiteNotExist));
                 }
@@ -517,6 +615,35 @@ fn compile_and_run(
                 {
                     Ok(cfg) => cfg,
                     Err(e) => return (0, Err(e)),
+                };
+
+                let request_unused_port_from_os = 0;
+                let url = match ("localhost", request_unused_port_from_os)
+                    .to_socket_addrs()
+                    .context("creating socket address")
+                    .and_then(|mut it| {
+                        it.next()
+                            .ok_or_else(|| anyhow::anyhow!("No socket addresses found"))
+                    }) {
+                    Ok(url) => url,
+                    Err(e) => return (0, Err(CompileAndRunError::Server(e))),
+                };
+
+                let server = suite_config
+                    .network
+                    .clone()
+                    .map(|network| Server::new(&server_pool, Protocol::Http, url, network));
+                let suite_config = match suite_config
+                    .make_ready(server.as_ref().map(|s| (s.url().to_string(), s.protocol())))
+                {
+                    Ok(suite_config) => suite_config,
+                    Err(e) => {
+                        return (
+                            0,
+                            // TODO(harry) better error here (invalid output.json file)
+                            Err(CompileAndRunError::Server(e)),
+                        );
+                    }
                 };
 
                 let compile_failure_allowed =
@@ -537,13 +664,14 @@ fn compile_and_run(
                 ) {
                     (r, Ok(())) => (r),
                     (r, Err(e)) => {
+                        debug!("Compiler failure compiling {}", suite.as_ref().display());
                         return (
                             r,
                             Err(CompileAndRunError::CompileFailure {
                                 allowed: compile_failure_allowed,
                                 reason: e,
                             }),
-                        )
+                        );
                     }
                 };
 
@@ -589,9 +717,9 @@ fn compile_and_run(
                 if run_failure_required {
                     return (retries, Err(CompileAndRunError::ExpectedRunFailure));
                 }
-
                 (retries, Ok(()))
-            })();
+            })
+            .unwrap();
             ((elm_compiler, opt_level), res)
         })
         .collect()
@@ -707,4 +835,57 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
         }
     };
     suites.into_par_iter().map(scanner).while_some().apply(Ok)
+}
+
+struct Server<'pool> {
+    id: ServerId<'pool>,
+    protocol: Protocol,
+}
+
+impl<'pool> Server<'pool> {
+    fn new(
+        server_pool: &'pool ServerPool,
+        protocol: Protocol,
+        a: SocketAddr,
+        network_data: Arc<[NetworkItem]>,
+    ) -> Self {
+        #[allow(clippy::mutex_atomic)]
+        let index = Arc::new(Mutex::new(0));
+        Self {
+            id: server_pool.start(
+                warp::path::full()
+                    .and(warp::method())
+                    .map(move |name: warp::path::FullPath, method| {
+                        let mut i = index.lock().unwrap();
+                        match &network_data[*i] {
+                            NetworkItem {
+                                request: Request::Get { url },
+                                response,
+                            } => {
+                                debug!("Request with url {} and method GET", name.as_str());
+                                assert!(method == warp::http::Method::GET);
+                                assert!(name.as_str() == url);
+                                *i += 1;
+                                response.0.clone()
+                            }
+                        }
+                    })
+                    .with(warp::log("api")),
+                protocol,
+                a,
+            ),
+            protocol,
+        }
+    }
+
+    fn url(&self) -> SocketAddr {
+        self.id.url
+    }
+
+    fn protocol(&self) -> String {
+        match self.protocol {
+            Protocol::Http => "http://".into(),
+            Protocol::Https => "https://".into(),
+        }
+    }
 }

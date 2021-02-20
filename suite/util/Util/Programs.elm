@@ -1,7 +1,16 @@
-module Util.Programs exposing (noop, print, sendCmd)
+module Util.Programs exposing (SuiteFlags, noop, print, sendCmd)
 
 import Platform
 import Util.Cmds
+
+
+type alias SuiteFlags a =
+    { a
+        | suite :
+            { url : String
+            , protocol : String
+            }
+    }
 
 
 sendCmd : Cmd a -> Platform.Program () () a

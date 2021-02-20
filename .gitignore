@@ -5,3 +5,4 @@ elm-stuff/
 /tmp/
 /node_modules/
 /.elm/
+/.cargo/

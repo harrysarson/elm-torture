@@ -243,6 +243,8 @@ pub fn compile_and_run_error<'a, Pe: AsRef<Path> + 'a, Ps: AsRef<Path> + 'a>(
                 "elm-torture expected a failure when running suite {}",
                 &suite.as_ref().display(),
             ),
+
+            Server(err) => write!(f, "could not run testing server {}", &err),
         }
     })
 }

@@ -22,9 +22,12 @@ fn get_exit_code(err: &suite::CompileAndRunError) -> i32 {
     use suite::CompileAndRunError::*;
 
     match err {
-        SuiteNotExist | SuiteNotDir | SuiteNotElm | OutDirIsNotDir | CannotGetSuiteConfig(_) => {
-            CATCH_ALL_ERROR_CODE
-        }
+        SuiteNotExist
+        | SuiteNotDir
+        | SuiteNotElm
+        | OutDirIsNotDir
+        | CannotGetSuiteConfig(_)
+        | Server(_) => CATCH_ALL_ERROR_CODE,
 
         CompileFailure { allowed, .. } => {
             if *allowed {
