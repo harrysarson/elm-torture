@@ -56,12 +56,10 @@ fn sscce_result_printer(
     }: &suite::CompileAndRunResults<impl AsRef<Path>>,
 ) {
     let errors_to_print = errors.iter().filter_map(|(ol, (retries, me))| match me {
-        Some(suite::CompileAndRunError::RunFailure { allowed, .. })
-        | Some(suite::CompileAndRunError::CompileFailure { allowed, .. })
-            if *allowed =>
-        {
-            None
-        }
+        Some(
+            suite::CompileAndRunError::RunFailure { allowed, .. }
+            | suite::CompileAndRunError::CompileFailure { allowed, .. },
+        ) if *allowed => None,
         e => e.as_ref().map(|ee| (ol, (retries, ee))),
     });
     for ((elm_compiler, opt_level), (retries, e)) in errors_to_print {
