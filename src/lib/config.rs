@@ -177,6 +177,13 @@ impl Config {
         &self.elm_compilers.as_ref().unwrap_or(&*ELM)
     }
 
+    pub fn runner(&self) -> &Vec<Runner> {
+        lazy_static::lazy_static! {
+            static ref RUNNERS: Vec<Runner> = vec![Runner::Node];
+        }
+        &self.runners.as_ref().unwrap_or(&*RUNNERS)
+    }
+
     pub fn node(&self) -> &str {
         self.node.as_ref().map_or_else(|| "node", String::as_str)
     }

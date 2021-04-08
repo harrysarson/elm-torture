@@ -86,38 +86,12 @@ fn run_error<'a>(err: &'a suite::RunError, out_dir: &'a Path) -> impl fmt::Displ
     easy_format(move |f| {
         use suite::RunError::*;
         match err {
-            NodeNotFound(err) => write!(
-                f,
-                "Could not find node executable to run generated Javascript. Details:\n{}",
-                err
-            ),
+            Node(node_err) => write!(f, "{}", &node_run_error(node_err, out_dir)),
             SuiteDoesNotExist => {
                 panic!("Path was not suite - this should have been checked already!")
             }
-            NodeProcess(err) => panic!("The node process errored unexpectedly:\n{}", err),
-            WritingHarness(err) => panic!(
-                "Cannot add the test harness to the output directory. Details:\n{}",
-                err
-            ),
-            ExpectedOutputNotUtf8(_) => panic!("Expected output is not valid utf8"),
-            CopyingExpectedOutput(err) => panic!(
-                "The expected output exists but cannot be copied. Details:\n{}",
-                err
-            ),
-            Runtime(output) => {
-                write!(f, "{}", process_output(&output))?;
-                write!(
-                    f,
-                    "\n\nTo inspect the built files that caused this error see:\n  {}",
-                    out_dir.display()
-                )
-            }
+            Process(runner, err) => panic!("The {} process errored unexpectedly:\n{}", runner, err),
 
-            OutputProduced(output) => write!(
-                f,
-                "The suite ran without error but produced the following output!:\n{}",
-                process_output(&output)
-            ),
             Timeout {
                 after,
                 stdout,
@@ -143,6 +117,36 @@ To inspect the built files that caused this error see: {}",
                     }
                 }),
                 out_dir.display()
+            ),
+        }
+    })
+}
+
+fn node_run_error<'a>(err: &'a suite::NodeRunError, out_dir: &'a Path) -> impl fmt::Display + 'a {
+    easy_format(move |f| {
+        use suite::NodeRunError::*;
+        match err {
+            NodeNotFound(err) => write!(
+                f,
+                "Could not find node executable to run generated Javascript. Details:\n{}",
+                err
+            ),
+            WritingHarness(err) => panic!(
+                "Cannot add the test harness to the output directory. Details:\n{}",
+                err
+            ),
+            Runtime(output) => {
+                write!(f, "{}", process_output(&output))?;
+                write!(
+                    f,
+                    "\n\nTo inspect the built files that caused this error see:\n  {}",
+                    out_dir.display()
+                )
+            }
+            OutputProduced(output) => write!(
+                f,
+                "The suite ran without error but produced the following output!:\n{}",
+                process_output(&output)
             ),
             WritingExpectedOutput(err) => panic!(
                 "Error whilst writing expected output to disk. Details:\n{}",
@@ -224,7 +228,7 @@ pub fn compile_and_run_error<'a, Pe: AsRef<Path> + 'a, Ps: AsRef<Path> + 'a>(
                     f,
                     "Suite {} failed at run time.\n{}\n",
                     &suite.as_ref().display(),
-                    indented::indented(run_error(&reason, out_dir.as_ref()))
+                    indented::indented(run_error(reason, out_dir.as_ref()))
                 )?;
                 if *allowed {
                     write!(f, "Failure allowed, continuing...")
