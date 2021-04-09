@@ -45,11 +45,50 @@ impl fmt::Display for OptimizationLevel {
     }
 }
 
-// fn serialize_os_str<S>(str: &OsStr, s: S) -> Result<S::Ok, S::Error>
-// where
-//     S: serde::Serializer,
-// {
-// }
+impl FromStr for OptimizationLevel {
+    type Err = InvalidOptimizationLevel;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "debug" => Self::Debug,
+            "dev" => Self::Dev,
+            "optimize" => Self::Optimize,
+            _ => return Err(InvalidOptimizationLevel(s.to_string())),
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clap, PartialEq, Eq, Clone, Copy, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum Runner {
+    Node,
+    Chrome,
+}
+
+impl fmt::Display for Runner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Node => &"node (default)",
+                Self::Chrome => &"chrome",
+            }
+        )
+    }
+}
+
+impl FromStr for Runner {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "node" => Self::Node,
+            "chrome" => Self::Chrome,
+            _ => anyhow::bail!("Invalid runner: {}", s),
+        })
+    }
+}
 
 #[derive(Debug, Default, Deserialize, Serialize, Clap)]
 #[serde(deny_unknown_fields)]
@@ -63,9 +102,15 @@ pub struct Config {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     elm_compilers: Option<Vec<String>>,
+
+    #[clap(long, about = "Runners to use for evaluating SSCCEs.")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runners: Option<Vec<Runner>>,
+
     #[clap(long, about = "Path to node.")]
     #[serde(skip_serializing_if = "Option::is_none")]
     node: Option<String>,
+
     #[clap(
         short,
         long,
@@ -75,6 +120,7 @@ pub struct Config {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     opt_levels: Option<Vec<OptimizationLevel>>,
+
     #[clap(
         long,
         value_name = "N",
@@ -82,6 +128,7 @@ pub struct Config {
     )]
     #[serde(skip_serializing_if = "Option::is_none")]
     compiler_max_retries: Option<usize>,
+
     #[clap(
         long,
         value_name = "DURATION",
@@ -114,6 +161,7 @@ impl Config {
 
         Config {
             elm_compilers: merge!(elm_compilers),
+            runners: merge!(runners),
             node: merge!(node),
             opt_levels: merge!(opt_levels),
             compiler_max_retries: merge!(compiler_max_retries),
@@ -127,6 +175,13 @@ impl Config {
             static ref ELM: Vec<String> = vec!["elm".to_string()];
         }
         &self.elm_compilers.as_ref().unwrap_or(&*ELM)
+    }
+
+    pub fn runner(&self) -> &Vec<Runner> {
+        lazy_static::lazy_static! {
+            static ref RUNNERS: Vec<Runner> = vec![Runner::Node];
+        }
+        &self.runners.as_ref().unwrap_or(&*RUNNERS)
     }
 
     pub fn node(&self) -> &str {
@@ -152,19 +207,6 @@ impl Config {
 
 #[derive(Debug)]
 pub struct InvalidOptimizationLevel(String);
-
-impl FromStr for OptimizationLevel {
-    type Err = InvalidOptimizationLevel;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "debug" => Self::Debug,
-            "dev" => Self::Dev,
-            "optimize" => Self::Optimize,
-            _ => return Err(InvalidOptimizationLevel(s.to_string())),
-        })
-    }
-}
 
 impl fmt::Display for InvalidOptimizationLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

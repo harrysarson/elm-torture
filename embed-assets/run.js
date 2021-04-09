@@ -1,8 +1,8 @@
 
-const assert = require('assert');
+import assert from 'assert';
 
 
-module.exports = function (generated, output) {
+export default function (generated, output) {
     const { ports = [], flags, logs : expectedLogs = '' } = output;
     let actualLogs = ''
     generated._debugLog = str => {
