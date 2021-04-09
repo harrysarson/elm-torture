@@ -489,26 +489,38 @@ fn run(
 
     let setup_for_node = || {
         let node_exe = which::which(&config.node()).map_err(NodeRunError::NodeNotFound)?;
-        let harness_file = out_dir.join("harness.js");
+        let harness_file = out_dir.join("harness.mjs");
         let xml_http_request_file = out_dir.join("xmlhttprequest.js");
-        let output_file = out_dir.join("output.json");
-        let main_file = out_dir.join("main.js");
+        let output_file = out_dir.join("output.mjs");
+        let main_file = out_dir.join("main.mjs");
 
         fs::write(
             &harness_file,
             &include_bytes!("../../embed-assets/run.js")[..],
         )
         .map_err(NodeRunError::WritingHarness)?;
+
         fs::write(
             &xml_http_request_file,
             &include_bytes!("../../embed-assets/elm-serverless/src-bridge/xmlhttprequest.js")[..],
         )
         .map_err(NodeRunError::WritingHarness)?;
-        fs::write(
-            &output_file,
-            &serde_json::to_vec_pretty(&suite_config).expect("Failed to reserialize output json"),
-        )
-        .map_err(NodeRunError::WritingExpectedOutput)?;
+
+        let mut output = File::create(output_file).map_err(NodeRunError::WritingExpectedOutput)?;
+
+        [
+            b"export default ",
+            serde_json::to_vec_pretty(&suite_config)
+                .expect("Failed to re-serialize output json")
+                .as_slice(),
+            b";",
+        ]
+        .iter()
+        .try_for_each(|bytes| {
+            output
+                .write_all(bytes)
+                .map_err(NodeRunError::WritingExpectedOutput)
+        })?;
 
         File::create(&main_file)
             .map_err(NodeRunError::WritingHarness)?
@@ -516,10 +528,12 @@ fn run(
                 write!(
                     f,
                     r#"
-const harness = require('./harness.js');
-global.XMLHttpRequest = require('./xmlhttprequest.js').XMLHttpRequest;
-const generated = require('./elm-{}.js');
-const expectedOutput = require('./output.json');
+import harness from './harness.mjs';
+import * as XMLHttpRequest from './xmlhttprequest.js';
+import generated from './elm-{}.js';
+import expectedOutput from './output.mjs';
+
+global.XMLHttpRequest = XMLHttpRequest.XMLHttpRequest;
 
 harness(generated, expectedOutput);
 "#,
