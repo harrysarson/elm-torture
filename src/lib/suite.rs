@@ -1,4 +1,5 @@
 use super::config;
+use super::config::Runner;
 use super::server_pool::Protocol;
 use super::server_pool::ServerId;
 use super::server_pool::ServerPool;
@@ -20,6 +21,7 @@ use std::env;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
+use std::process;
 use std::process::{Output, Stdio};
 use std::sync::Arc;
 use std::{collections::HashMap, fs::File};
@@ -28,7 +30,6 @@ use std::{io, process::Command};
 use std::{
     path::Path,
     path::PathBuf,
-    string,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
@@ -338,23 +339,25 @@ pub enum GetSuiteConfigError {
     Parse(serde_json::Error),
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum RunError {
-    NodeNotFound(which::Error),
+    Node(NodeRunError),
     SuiteDoesNotExist,
-    NodeProcess(io::Error),
-    WritingHarness(io::Error),
-    CopyingExpectedOutput(io::Error),
-    Runtime(Output),
-    WritingExpectedOutput(io::Error),
-    ExpectedOutputNotUtf8(string::FromUtf8Error),
-    OutputProduced(Output),
+    Process(Runner, io::Error),
     Timeout {
         after: Duration,
         stdout: Vec<u8>,
         stderr: Vec<u8>,
     },
+}
+
+#[derive(Debug)]
+pub enum NodeRunError {
+    NodeNotFound(which::Error),
+    WritingHarness(io::Error),
+    Runtime(Output),
+    WritingExpectedOutput(io::Error),
+    OutputProduced(Output),
 }
 
 #[derive(Debug)]
@@ -465,7 +468,14 @@ fn get_suite_config(suite: impl AsRef<Path>) -> Result<Config<Raw>, GetSuiteConf
     .map_err(GetSuiteConfigError::Parse)
 }
 
-#[allow(clippy::too_many_lines)]
+fn read_to_buf(mut read: impl io::Read) -> io::Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+
+    // read the whole file
+    read.read_to_end(&mut buffer)?;
+    Ok(buffer)
+}
+
 fn run(
     suite: &Path,
     out_dir: &Path,
@@ -473,61 +483,74 @@ fn run(
     config: &config::Config,
     suite_config: &Config<Ready>,
 ) -> Result<(), RunError> {
-    fn read_to_buf(mut read: impl io::Read) -> io::Result<Vec<u8>> {
-        let mut buffer = Vec::new();
-
-        // read the whole file
-        read.read_to_end(&mut buffer)?;
-        Ok(buffer)
-    }
-
     if !suite.join("elm.json").exists() {
         return Err(RunError::SuiteDoesNotExist);
     }
-    let node_exe = which::which(&config.node()).map_err(RunError::NodeNotFound)?;
-    let harness_file = out_dir.join("harness.js");
-    let xml_http_request_file = out_dir.join("xmlhttprequest.js");
-    let output_file = out_dir.join("output.json");
-    let main_file = out_dir.join("main.js");
 
-    fs::write(
-        &harness_file,
-        &include_bytes!("../../embed-assets/run.js")[..],
-    )
-    .map_err(RunError::WritingHarness)?;
-    fs::write(
-        &xml_http_request_file,
-        &include_bytes!("../../embed-assets/elm-serverless/src-bridge/xmlhttprequest.js")[..],
-    )
-    .map_err(RunError::WritingHarness)?;
-    fs::write(
-        &output_file,
-        &serde_json::to_vec_pretty(&suite_config).expect("Failed to reserialize output json"),
-    )
-    .map_err(RunError::WritingExpectedOutput)?;
+    let setup_for_node = || {
+        let node_exe = which::which(&config.node()).map_err(NodeRunError::NodeNotFound)?;
+        let harness_file = out_dir.join("harness.mjs");
+        let xml_http_request_file = out_dir.join("xmlhttprequest.js");
+        let output_file = out_dir.join("output.mjs");
+        let main_file = out_dir.join("main.mjs");
 
-    File::create(&main_file)
-        .map_err(RunError::WritingHarness)?
-        .apply(|mut f| {
-            write!(
-                f,
-                r#"
-const harness = require('./harness.js');
-global.XMLHttpRequest = require('./xmlhttprequest.js').XMLHttpRequest;
-const generated = require('./elm-{}.js');
-const expectedOutput = require('./output.json');
+        fs::write(
+            &harness_file,
+            &include_bytes!("../../embed-assets/run.js")[..],
+        )
+        .map_err(NodeRunError::WritingHarness)?;
+
+        fs::write(
+            &xml_http_request_file,
+            &include_bytes!("../../embed-assets/elm-serverless/src-bridge/xmlhttprequest.js")[..],
+        )
+        .map_err(NodeRunError::WritingHarness)?;
+
+        let mut output = File::create(output_file).map_err(NodeRunError::WritingExpectedOutput)?;
+
+        [
+            b"export default ",
+            serde_json::to_vec_pretty(&suite_config)
+                .expect("Failed to re-serialize output json")
+                .as_slice(),
+            b";",
+        ]
+        .iter()
+        .try_for_each(|bytes| {
+            output
+                .write_all(bytes)
+                .map_err(NodeRunError::WritingExpectedOutput)
+        })?;
+
+        File::create(&main_file)
+            .map_err(NodeRunError::WritingHarness)?
+            .apply(|mut f| {
+                write!(
+                    f,
+                    r#"
+import harness from './harness.mjs';
+import * as XMLHttpRequest from './xmlhttprequest.js';
+import generated from './elm-{}.js';
+import expectedOutput from './output.mjs';
+
+global.XMLHttpRequest = XMLHttpRequest.XMLHttpRequest;
 
 harness(generated, expectedOutput);
 "#,
-                opt_level.id()
-            )
-        })
-        .map_err(RunError::WritingHarness)?;
+                    opt_level.id()
+                )
+            })
+            .map_err(NodeRunError::WritingHarness)?;
+
+        Ok((node_exe, main_file))
+    };
+
+    let (node_exe, main_file) = setup_for_node().map_err(RunError::Node)?;
 
     // We pick a timezone **without** changes in offset for consistent testing.
     let tz = "Asia/Bahrain";
 
-    let mut runner_child = Command::new(node_exe)
+    let runner_child = Command::new(node_exe)
         .arg("--unhandled-rejections=strict")
         .arg(&main_file)
         .env("TZ", tz)
@@ -535,56 +558,63 @@ harness(generated, expectedOutput);
         .stdin(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(RunError::NodeProcess)?;
+        .map_err(|e| RunError::Process(Runner::Node, e))?;
 
-    let runner_status = runner_child
+    let output = wait_timeout(runner_child, config)?;
+
+    let post_checks = || {
+        if !output.status.success() {
+            return Err(NodeRunError::Runtime(output));
+        }
+        if !output.stdout.is_empty() {
+            return Err(NodeRunError::OutputProduced(output));
+        }
+        let possible_stderr = |mode| {
+            format!(
+                "Compiled in {} mode. Follow the advice at https://elm-lang.org/0.19.1/optimize for better performance and smaller assets.\n",
+                mode
+            ).into_bytes()
+        };
+        if !output.stderr.is_empty()
+            && output.stderr[..] != *possible_stderr("DEV")
+            && output.stderr[..] != *possible_stderr("DEBUG")
+        {
+            return Err(NodeRunError::OutputProduced(output));
+        }
+
+        Ok(())
+    };
+    post_checks().map_err(RunError::Node)
+}
+
+fn wait_timeout(
+    mut runner_child: process::Child,
+    config: &config::Config,
+) -> Result<process::Output, RunError> {
+    let stdout = read_to_buf(runner_child.stdout.take().unwrap())
+        .map_err(|e| RunError::Process(Runner::Node, e))?;
+    let stderr = read_to_buf(runner_child.stderr.take().unwrap())
+        .map_err(|e| RunError::Process(Runner::Node, e))?;
+
+    if let Some(status) = runner_child
         .wait_timeout(config.run_timeout())
-        .map_err(RunError::NodeProcess)?
-        .map_or_else(
-            || {
-                runner_child.kill().map_err(RunError::NodeProcess)?;
-                let stdout = read_to_buf(runner_child.stdout.as_mut().unwrap())
-                    .map_err(RunError::NodeProcess)?;
-                let stderr = read_to_buf(runner_child.stderr.as_mut().unwrap())
-                    .map_err(RunError::NodeProcess)?;
-                Err(RunError::Timeout {
-                    after: config.run_timeout(),
-                    stdout,
-                    stderr,
-                })
-            },
-            Ok,
-        )?;
-
-    let stdout = read_to_buf(runner_child.stdout.unwrap()).map_err(RunError::NodeProcess)?;
-    let stderr = read_to_buf(runner_child.stderr.unwrap()).map_err(RunError::NodeProcess)?;
-
-    let output = Output {
-        status: runner_status,
-        stdout,
-        stderr,
-    };
-
-    if !output.status.success() {
-        return Err(RunError::Runtime(output));
-    }
-    if !output.stdout.is_empty() {
-        return Err(RunError::OutputProduced(output));
-    }
-    let possible_stderr = |mode| {
-        format!(
-            "Compiled in {} mode. Follow the advice at https://elm-lang.org/0.19.1/optimize for better performance and smaller assets.\n",
-            mode
-        ).into_bytes()
-    };
-    if !output.stderr.is_empty()
-        && output.stderr[..] != *possible_stderr("DEV")
-        && output.stderr[..] != *possible_stderr("DEBUG")
+        .map_err(|e| RunError::Process(Runner::Node, e))?
     {
-        return Err(RunError::OutputProduced(output));
+        Ok(process::Output {
+            status,
+            stdout,
+            stderr,
+        })
+    } else {
+        runner_child
+            .kill()
+            .map_err(|e| RunError::Process(Runner::Node, e))?;
+        Err(RunError::Timeout {
+            after: config.run_timeout(),
+            stdout,
+            stderr,
+        })
     }
-
-    Ok(())
 }
 
 pub type SscceRunType = (ElmCompilerPath, OptimizationLevel);
@@ -735,7 +765,7 @@ fn compile_and_run(
 
 pub struct CompileAndRunResults<Ps> {
     pub suite: Ps,
-    // TODO(harry): move into RunError!
+    // TODO(harry): move into NodeRunError!
     pub sscce_out_dir: PathBuf,
     /// None indicates that elm-torture ran SSCCE successfully. FIrst element
     /// in tuple is retry count.
@@ -754,7 +784,7 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
     instructions: &'a super::cli::Instructions,
 ) -> Result<impl IntoParallelIterator<Item = CompileAndRunResults<Ps>> + 'a, SuitesError> {
     let (tmp_dir_raw, out_dir) = if let Some(out_dir) = &instructions.config.out_dir {
-        (None, out_dir.to_path_buf())
+        (None, out_dir.clone())
     } else {
         let td = tempfile::Builder::new()
             .prefix("elm-torture")
@@ -766,7 +796,7 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
     let tmp_dir = Mutex::new(tmp_dir_raw);
 
     if !out_dir.exists() {
-        let _ = fs::create_dir(&out_dir);
+        let _r = fs::create_dir(&out_dir);
     }
     let compiler_lock = Mutex::new(());
     let prev_runs_failed = AtomicBool::new(false);
@@ -786,7 +816,7 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
             let sscce_out_dir = out_dir.join(suite.as_ref().file_name().expect("todo"));
 
             if !sscce_out_dir.exists() {
-                let _ = fs::create_dir(&sscce_out_dir);
+                let _r = fs::create_dir(&sscce_out_dir);
             }
             if !sscce_out_dir.is_dir() {
                 // TODO(harry): handle this error better
@@ -822,7 +852,7 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
                         dir.into_path();
                     }
                 } else {
-                    let _ = fs::remove_dir_all(&sscce_out_dir);
+                    let _r = fs::remove_dir_all(&sscce_out_dir);
                 };
                 let failed = match res {
                     Err(CompileAndRunError::CompileFailure { allowed: true, .. })

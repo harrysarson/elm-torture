@@ -1,6 +1,8 @@
 #![warn(clippy::all, clippy::pedantic)]
 // https://github.com/rust-lang/rust-clippy/issues/5822
 #![allow(clippy::option_if_let_else)]
+// Remove once 1.53 is stable
+#![allow(clippy::unnested_or_patterns)]
 
 mod lib;
 
