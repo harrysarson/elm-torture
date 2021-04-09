@@ -855,10 +855,8 @@ pub fn compile_and_run_suites<'a, Ps: AsRef<Path> + Send + Sync + 'a>(
                     let _r = fs::remove_dir_all(&sscce_out_dir);
                 };
                 let failed = match res {
-                    Err(
-                        CompileAndRunError::CompileFailure { allowed: true, .. }
-                        | CompileAndRunError::RunFailure { allowed: true, .. },
-                    )
+                    Err(CompileAndRunError::CompileFailure { allowed: true, .. })
+                    | Err(CompileAndRunError::RunFailure { allowed: true, .. })
                     | Ok(_) => false,
                     Err(_) => true,
                 };
